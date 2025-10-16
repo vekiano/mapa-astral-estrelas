@@ -571,81 +571,89 @@ def index():
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Mapa Astral</title>
 <style>*{{margin:0;padding:0;box-sizing:border-box}}body{{font-family:Arial;background:linear-gradient(135deg,#667eea,#764ba2);min-height:100vh;padding:20px}}
-.container{{max-width:700px;margin:0 auto;background:white;border-radius:12px;padding:30px;box-shadow:0 20px 60px rgba(0,0,0,0.3)}}h1{{text-align:center;color:#333;margin-bottom:20px}}
-fieldset{{border:1px solid #ddd;border-radius:8px;padding:15px;margin-bottom:20px}}legend{{padding:0 10px;color:#667eea;font-weight:bold}}
-input,select{{padding:8px;margin:5px 0;border:1px solid #ddd;border-radius:4px;font-size:12px}}
-.row{{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:5px;margin-bottom:10px}}
-.row3{{display:grid;grid-template-columns:80px 80px 80px 50px;gap:5px;margin-bottom:10px}}
-.row2{{display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px;margin-bottom:10px}}
-button{{width:100%;padding:10px;background:linear-gradient(135deg,#667eea,#764ba2);color:white;border:none;border-radius:4px;cursor:pointer;font-weight:bold}}
+.container{{max-width:680px;margin:0 auto;background:white;border-radius:12px;padding:25px;box-shadow:0 20px 60px rgba(0,0,0,0.3)}}h1{{text-align:center;color:#333;margin-bottom:18px;font-size:24px}}
+fieldset{{border:1px solid #ddd;border-radius:8px;padding:12px;margin-bottom:15px}}legend{{padding:0 8px;color:#667eea;font-weight:bold;font-size:13px}}
+input,select{{padding:5px;margin:3px 0;border:1px solid #ddd;border-radius:4px;font-size:11px}}
+label{{font-size:11px;color:#555;display:block;margin-top:4px;margin-bottom:2px}}
+.row{{display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-bottom:8px}}
+.row3{{display:grid;grid-template-columns:60px 60px 60px 45px;gap:3px;margin-bottom:8px}}
+.row2{{display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:6px;margin-bottom:8px}}
+.rowtz{{display:grid;grid-template-columns:100px 1fr;gap:6px;margin-bottom:8px}}
+button{{width:100%;padding:8px;background:linear-gradient(135deg,#667eea,#764ba2);color:white;border:none;border-radius:4px;cursor:pointer;font-weight:bold;font-size:12px}}
 button:hover{{transform:translateY(-2px)}}
-.resultado{{margin-top:20px;padding:15px;background:#f0f9ff;border-radius:8px;display:none;max-height:400px;overflow-y:auto}}
-.resultado pre{{font-family:monospace;font-size:11px;color:#1e3a8a}}
-.loading{{display:none;text-align:center;color:#667eea;font-weight:bold}}
+.resultado{{margin-top:20px;padding:15px;background:#f0f9ff;border-radius:8px;display:none;max-height:500px;overflow-y:auto}}
+.resultado pre{{font-family:monospace;font-size:10px;color:#1e3a8a}}
+.loading{{display:none;text-align:center;color:#667eea;font-weight:bold;font-size:12px}}
 #modal{{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center}}
 #modal>div{{background:white;padding:20px;border-radius:8px;width:90%;max-width:400px}}
 #cidades-list{{max-height:200px;overflow-y:auto;border:1px solid #ddd;border-radius:4px}}
-.cidade-item{{padding:8px;border-bottom:1px solid #eee;cursor:pointer}}
+.cidade-item{{padding:8px;border-bottom:1px solid #eee;cursor:pointer;font-size:11px}}
 .cidade-item:hover{{background:#f0f9ff}}
+.btn-copy{{margin-top:10px;width:auto;display:inline-block;padding:6px 12px;font-size:11px}}
 </style>
 </head>
 <body><div class="container"><h1>🌙 Mapa Astral Online</h1>
 <form id="f">
 <fieldset><legend>Identificação</legend>
-<input type="text" id="nome" value="Mapa do Momento" required>
+<input type="text" id="nome" value="Mapa do Momento" required style="width:100%">
+<label>Dia / Mês / Ano</label>
 <div class="row">
 <input type="number" id="dia" min="1" max="31" value="{now.day}" required>
 <input type="number" id="mes" min="1" max="12" value="{now.month}" required>
 <input type="number" id="ano" value="{now.year}" required>
-<div style="border:1px solid #ddd;border-radius:4px;padding:8px;text-align:center;background:#f9f9f9">{now.day:02d}/{now.month:02d}/{now.year}</div>
 </div>
+<label>Hora / Min / Seg (Hora Local)</label>
 <div class="row">
 <input type="number" id="hora" min="0" max="23" value="{now.hour}" required>
 <input type="number" id="minuto" min="0" max="59" value="{now.minute}" required>
 <input type="number" id="segundo" min="0" max="59" value="{now.second}" required>
-<div style="border:1px solid #ddd;border-radius:4px;padding:8px;text-align:center;background:#f9f9f9">{now.hour:02d}:{now.minute:02d}:{now.second:02d}</div>
 </div>
 </fieldset>
 <fieldset><legend>Localização</legend>
 <div class="row2">
-<input type="text" id="cidade" value="Brasília" required>
-<input type="text" id="estado" value="DF" required>
-<input type="text" id="pais" value="Brasil" required>
-<button type="button" onclick="abrirBusca()">Buscar</button>
+<input type="text" id="cidade" value="Brasília" required placeholder="Cidade">
+<input type="text" id="estado" value="DF" required placeholder="Estado">
+<input type="text" id="pais" value="Brasil" required placeholder="País">
+<button type="button" onclick="abrirBusca()" style="width:auto;padding:5px 10px">Buscar</button>
 </div>
+<label>Latitude ... º  '  "</label>
 <div class="row3">
 <input type="number" id="latg" min="0" max="90" value="15" required>
 <input type="number" id="latm" min="0" max="59" value="46" required>
 <input type="number" id="lats" min="0" max="59" value="12" required>
-<select id="lath"><option>N</option><option selected>S</option></select>
+<select id="lath" style="width:100%"><option>N</option><option selected>S</option></select>
 </div>
+<label>Longitude ... º '  "</label>
 <div class="row3">
 <input type="number" id="long" min="0" max="180" value="47" required>
 <input type="number" id="lonm" min="0" max="59" value="55" required>
 <input type="number" id="lons" min="0" max="59" value="12" required>
-<select id="lonh"><option>E</option><option selected>W</option></select>
+<select id="lonh" style="width:100%"><option>E</option><option selected>W</option></select>
 </div>
-<div class="row2" style="grid-template-columns:100px 1fr">
-<input type="number" id="tz" step="0.5" value="-3" required>
-<select><option>W</option><option>E</option></select>
+<label>Zona de Tempo (UTC)</label>
+<div class="rowtz">
+<input type="number" id="tz" step="0.5" value="-3" required style="width:100%">
+<select style="width:100%;display:none"><option>W</option><option>E</option></select>
 </div>
+<label>Casas Terrestres</label>
 <select style="width:100%"><option>Regiomontanus</option></select>
 </fieldset>
 <button type="submit">CALCULAR</button>
 </form>
 <div class="loading" id="load">Calculando...</div>
-<div class="resultado" id="res"><pre id="txt"></pre></div>
+<div class="resultado" id="res"><pre id="txt"></pre><button class="btn-copy" onclick="copiarResultado()">📋 Copiar Texto</button></div>
 </div>
 
 <div id="modal"><div>
-<h3>Buscar Cidade</h3>
-<input type="text" id="search" placeholder="Digite a cidade..." style="width:100%;padding:10px;margin:10px 0;border:1px solid #ddd;border-radius:4px">
+<h3 style="font-size:14px;margin-bottom:10px">Buscar Cidade</h3>
+<input type="text" id="search" placeholder="Digite a cidade..." style="width:100%;padding:8px;margin:10px 0;border:1px solid #ddd;border-radius:4px;font-size:12px">
 <div id="cidades-list"></div>
-<button onclick="document.getElementById('modal').style.display='none'" style="margin-top:10px">Fechar</button>
+<button onclick="document.getElementById('modal').style.display='none'" style="margin-top:10px;padding:6px">Fechar</button>
 </div></div>
 
 <script>
 function dmsToDecimal(g,m,s,h){{let d=Math.abs(g)+Math.abs(m)/60+Math.abs(s)/3600;return(h=='S'||h=='W')?-d:d}}
+function copiarResultado(){{let txt=document.getElementById('txt').textContent;navigator.clipboard.writeText(txt).then(()=>{{alert('Texto copiado para a memória!')}}).catch(()=>{{alert('Erro ao copiar!')}})}}
 function abrirBusca(){{document.getElementById('modal').style.display='flex';document.getElementById('search').focus()}}
 document.getElementById('search').addEventListener('input',async e=>{{
   let q=e.target.value;if(q.length<2){{document.getElementById('cidades-list').innerHTML='';return}}
