@@ -650,6 +650,13 @@ function abrirBusca() {
   document.getElementById('search').focus();
 }
 
+function atualizarHoraLocal() {
+  let tz = parseFloat(document.getElementById('tz').value);
+  let hora_atual = parseInt(document.getElementById('hora').value);
+  let nova_hora = ((hora_atual + tz) % 24 + 24) % 24;
+  document.getElementById('hora').value = Math.floor(nova_hora);
+}
+
 document.getElementById('search').addEventListener('input', async function(e) {
   let q = e.target.value;
   if (q.length < 2) {
@@ -684,6 +691,7 @@ document.getElementById('search').addEventListener('input', async function(e) {
       document.getElementById('lons').value = lonS;
       document.getElementById('lonh').value = (d.lon < 0 ? 'W' : 'E');
       document.getElementById('tz').value = d.tz;
+      atualizarHoraLocal();
       document.getElementById('modal').style.display = 'none';
     };
     document.getElementById('cidades-list').appendChild(div);
