@@ -559,6 +559,15 @@ class MapaAstral:
 
         rel.append("")
         rel.append("=" * 100)
+        rel.append("")
+        rel.append("ASTRO-ANÁLISE")
+        rel.append("PROGRAMA FEITO POR ADONIS SALIBA (Out 2025)")
+        rel.append("(uso gratuito e franqueado)")
+        rel.append("")
+        rel.append("Para análise do mapa horário por IA:")
+        rel.append("https://chatgpt.com/g/g-EumgPewMI-astrologia-horaria-guia")
+        rel.append("")
+        rel.append("=" * 100)
         return "\n".join(rel)
 
 
