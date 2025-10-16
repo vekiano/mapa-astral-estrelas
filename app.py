@@ -67,6 +67,24 @@ def calcular_posicao_planeta(jd, planeta):
     return float(pos[0]) % 360.0
 
 
+def buscar_mudanca_signo_exata(jd1, jd2, planeta):
+    for _ in range(20):
+        jd_meio = (jd1 + jd2) / 2
+        lon1 = calcular_posicao_planeta(jd1, planeta)
+        lon2 = calcular_posicao_planeta(jd_meio, planeta)
+        lon3 = calcular_posicao_planeta(jd2, planeta)
+
+        sig1 = int(lon1 / 30.0) % 12
+        sig2 = int(lon2 / 30.0) % 12
+        sig3 = int(lon3 / 30.0) % 12
+
+        if sig2 != sig1:
+            jd2 = jd_meio
+        else:
+            jd1 = jd_meio
+    return (jd1 + jd2) / 2
+
+
 @dataclass
 class Corpo:
     nome: str
@@ -90,6 +108,16 @@ class Transito:
     tipo: str
 
 
+@dataclass
+class EventoAstral:
+    jd_exato: float
+    tipo: str
+    descricao: str
+
+    def __lt__(self, other):
+        return self.jd_exato < other.jd_exato
+
+
 class MapaAstral:
     def __init__(self, nome_mapa, dia, mes, ano, hora, minuto, segundo,
                  latitude_dec, longitude_dec, timezone_horas, cidade='', estado='', pais=''):
@@ -108,6 +136,7 @@ class MapaAstral:
         self.casas = {}
         self.aspectos_natais = []
         self.transitos = []
+        self.eventos = []
 
         swe.set_ephe_path(None)
 
@@ -148,11 +177,14 @@ class MapaAstral:
 
     def calcular_transitos(self, dias_margem=2):
         self.transitos.clear()
+        self.eventos.clear()
+
         dt_inicio = self.dt_utc - timedelta(days=dias_margem)
         dt_fim = self.dt_utc + timedelta(days=dias_margem)
         jd_inicio = dt_to_jd_utc(dt_inicio)
         jd_fim = dt_to_jd_utc(dt_fim)
 
+        # Aspectos
         planetas_list = list(PLANETAS.keys())
         for i, p1_nome in enumerate(planetas_list):
             for p2_nome in planetas_list[i + 1:]:
@@ -170,12 +202,73 @@ class MapaAstral:
                         diff_atual = angular_difference(pos1_atual, pos2_atual)
                         diff_prox = angular_difference(pos1_prox, pos2_prox)
 
-                        if abs(diff_atual - aspecto_deg) < orbe or abs(diff_prox - aspecto_deg) < orbe:
-                            trans = Transito(jd_atual, p1, p2, aspecto_deg, pos1_atual, pos2_atual, 0.01, 'aspecto')
-                            self.transitos.append(trans)
+                        gap_atual = abs(diff_atual - aspecto_deg)
+                        gap_prox = abs(diff_prox - aspecto_deg)
+
+                        if min(gap_atual, gap_prox) < orbe:
+                            trans = Transito(jd_atual, p1, p2, aspecto_deg, pos1_atual, pos2_atual,
+                                             min(gap_atual, gap_prox), 'aspecto')
+                            if trans not in self.transitos:
+                                self.transitos.append(trans)
                         jd_atual = jd_prox
 
-        self.transitos.sort(key=lambda x: x.jd_exato)
+        # Mudanças de signo
+        for nome, code in PLANETAS.items():
+            jd_atual = jd_inicio
+            signo_anterior = None
+            while jd_atual < jd_fim:
+                lon = calcular_posicao_planeta(jd_atual, code)
+                signo_atual = int(lon / 30.0) % 12
+
+                if signo_anterior is not None and signo_atual != signo_anterior:
+                    jd_mudanca = buscar_mudanca_signo_exata(jd_atual - 0.1, jd_atual, code)
+                    if jd_inicio <= jd_mudanca <= jd_fim:
+                        descricao = f"{nome} entra em {SIGNOS[signo_atual]}"
+                        self.eventos.append(EventoAstral(jd_mudanca, 'entrada_signo', descricao))
+
+                signo_anterior = signo_atual
+                jd_atual += 0.1
+
+        # VOC da Lua
+        entrada_lua = [e for e in self.eventos if 'LUA' in e.descricao and 'entra' in e.descricao]
+        for entrada in entrada_lua:
+            aspectos_antes = [t for t in self.transitos if t.planeta1 == swe.MOON or t.planeta2 == swe.MOON]
+            aspectos_antes = [t for t in aspectos_antes if t.jd_exato < entrada.jd_exato]
+
+            if aspectos_antes:
+                ultimo = max(aspectos_antes, key=lambda x: x.jd_exato)
+                jd_voc_inicio = ultimo.jd_exato + 1 / 86400.0
+                jd_voc_fim = entrada.jd_exato
+                duracao_dias = jd_voc_fim - jd_voc_inicio
+
+                horas = int(duracao_dias * 24)
+                minutos = int((duracao_dias * 24 - horas) * 60)
+
+                lon_antes = calcular_posicao_planeta(jd_voc_inicio, swe.MOON)
+                signo_saida = SIGNOS[int(lon_antes / 30.0) % 12]
+                signo_entrada = entrada.descricao.split()[-1]
+
+                descricao = f"LUA Fora de Curso {horas:02d}:{minutos:02d} até entrar em {signo_entrada}"
+                self.eventos.append(EventoAstral(jd_voc_inicio, 'voc', descricao))
+
+        # Adicionar transitos aos eventos
+        for trans in self.transitos:
+            p1_nome = PLANETA_REV.get(trans.planeta1, 'P1')
+            p2_nome = PLANETA_REV.get(trans.planeta2, 'P2')
+
+            asp_cod = None
+            for cod, (alvo, _) in ASPECTOS.items():
+                if abs(trans.aspecto - alvo) < 0.1:
+                    asp_cod = cod
+                    break
+
+            sig1, pos1 = graus_para_signo_posicao(trans.pos_planeta1)
+            sig2, pos2 = graus_para_signo_posicao(trans.pos_planeta2)
+
+            descricao = f"[{p1_nome} {asp_cod} {p2_nome}] - {pos1} {sig1} / {pos2} {sig2}"
+            self.eventos.append(EventoAstral(trans.jd_exato, 'aspecto', descricao))
+
+        self.eventos.sort()
 
     def gerar_relatorio(self):
         self.calcular_planetas()
@@ -184,36 +277,44 @@ class MapaAstral:
         self.calcular_transitos()
 
         rel = []
-        rel.append("=" * 80)
+        rel.append("=" * 100)
         rel.append(self.nome_mapa or "MAPA ASTRAL")
-        rel.append("=" * 80)
+        rel.append("=" * 100)
         rel.append(
-            f"Data: {self.dia:02d}/{self.mes:02d}/{self.ano}  Hora: {self.hora:02d}:{self.minuto:02d}:{self.segundo:02d}")
+            f"Data: {self.dia:02d}/{self.mes:02d}/{self.ano}  Hora: {self.hora:02d}:{self.minuto:02d}:{self.segundo:02d} (UTC {self.timezone_horas:+.1f}h)")
         if self.cidade or self.estado or self.pais:
             rel.append(f"Local: {self.cidade} / {self.estado} / {self.pais}")
-        rel.append(f"Lat: {self.latitude:.6f}°  Lon: {self.longitude:.6f}°  UTC: {self.timezone_horas:+.1f}h")
-        rel.append("=" * 80)
+        rel.append(f"Lat: {self.latitude:.6f}°  Lon: {self.longitude:.6f}°")
+        rel.append("=" * 100)
 
         rel.append("\nPLANETAS:")
-        rel.append("-" * 80)
+        rel.append("-" * 100)
         for nome in PLANETAS.keys():
             if nome in self.planetas:
                 c = self.planetas[nome]
                 rel.append(f"{nome:3s} [{c.pos_str} {c.signo}] {c.mov}")
 
-        rel.append("\nCASAS ASTROLÓGICAS:")
-        rel.append("-" * 80)
+        rel.append("\nCASAS:")
+        rel.append("-" * 100)
         for num in range(1, 13):
             c = self.casas[num]
             rel.append(f"Casa {num:2d}: {c['posicao']} {c['signo']}")
 
         rel.append(f"\nASPECTOS ({len(self.aspectos_natais)}):")
-        rel.append("-" * 80)
+        rel.append("-" * 100)
         for asp in sorted(self.aspectos_natais, key=lambda x: x['orbe']):
             linha = f"{asp['p1']:3s} [{asp['pos1']} {asp['sig1']}] {asp['cod']} {asp['p2']:3s} [{asp['pos2']} {asp['sig2']}] - Orbe: {asp['orbe']:.2f}°"
             rel.append(linha)
 
-        rel.append("\n" + "=" * 80)
+        if self.eventos:
+            rel.append(f"\nTRÂNSITOS, ENTRADAS E VOC ({len(self.eventos)}):")
+            rel.append("-" * 100)
+            for evt in self.eventos:
+                dt_evento = jd_para_datetime(evt.jd_exato, self.timezone_horas)
+                dt_str = dt_evento.strftime('%d/%m/%Y %H:%M:%S')
+                rel.append(f"{dt_str} - {evt.descricao}")
+
+        rel.append("\n" + "=" * 100)
         return "\n".join(rel)
 
 
@@ -223,111 +324,125 @@ def index():
     now = datetime.now()
     return f'''<!DOCTYPE html>
 <html lang="pt-BR">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Mapa Astral</title>
-    <style>
-        * {{margin:0; padding:0; box-sizing:border-box;}}
-        body {{font-family:Arial,sans-serif; background:linear-gradient(135deg,#667eea,#764ba2); min-height:100vh; padding:20px;}}
-        .container {{max-width:700px; margin:0 auto; background:white; border-radius:12px; padding:30px; box-shadow:0 20px 60px rgba(0,0,0,0.3);}}
-        h1 {{text-align:center; color:#333; margin-bottom:20px;}}
-        fieldset {{border:1px solid #ddd; border-radius:8px; padding:15px; margin-bottom:20px;}}
-        legend {{padding:0 10px; color:#667eea; font-weight:bold;}}
-        input,select {{padding:8px; margin:5px 0; border:1px solid #ddd; border-radius:4px; font-size:12px;}}
-        .row {{display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:5px; margin-bottom:10px;}}
-        .row3 {{display:grid; grid-template-columns:80px 80px 80px 50px; gap:5px; margin-bottom:10px;}}
-        .row2 {{display:grid; grid-template-columns:1fr 1fr 1fr auto; gap:8px; margin-bottom:10px;}}
-        button {{width:100%; padding:10px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;}}
-        button:hover {{transform:translateY(-2px);}}
-        .resultado {{margin-top:20px; padding:15px; background:#f0f9ff; border-radius:8px; display:none; max-height:400px; overflow-y:auto;}}
-        .resultado pre {{font-family:monospace; font-size:11px; color:#1e3a8a;}}
-        .loading {{display:none; text-align:center; color:#667eea; font-weight:bold;}}
-    </style>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mapa Astral</title>
+<style>*{{margin:0;padding:0;box-sizing:border-box}}body{{font-family:Arial;background:linear-gradient(135deg,#667eea,#764ba2);min-height:100vh;padding:20px}}
+.container{{max-width:700px;margin:0 auto;background:white;border-radius:12px;padding:30px;box-shadow:0 20px 60px rgba(0,0,0,0.3)}}h1{{text-align:center;color:#333;margin-bottom:20px}}
+fieldset{{border:1px solid #ddd;border-radius:8px;padding:15px;margin-bottom:20px}}legend{{padding:0 10px;color:#667eea;font-weight:bold}}
+input,select{{padding:8px;margin:5px 0;border:1px solid #ddd;border-radius:4px;font-size:12px}}
+.row{{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:5px;margin-bottom:10px}}
+.row3{{display:grid;grid-template-columns:80px 80px 80px 50px;gap:5px;margin-bottom:10px}}
+.row2{{display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px;margin-bottom:10px}}
+button{{width:100%;padding:10px;background:linear-gradient(135deg,#667eea,#764ba2);color:white;border:none;border-radius:4px;cursor:pointer;font-weight:bold}}
+button:hover{{transform:translateY(-2px)}}
+.resultado{{margin-top:20px;padding:15px;background:#f0f9ff;border-radius:8px;display:none;max-height:400px;overflow-y:auto}}
+.resultado pre{{font-family:monospace;font-size:11px;color:#1e3a8a}}
+.loading{{display:none;text-align:center;color:#667eea;font-weight:bold}}
+#modal{{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center}}
+#modal>div{{background:white;padding:20px;border-radius:8px;width:90%;max-width:400px}}
+#cidades-list{{max-height:200px;overflow-y:auto;border:1px solid #ddd;border-radius:4px}}
+.cidade-item{{padding:8px;border-bottom:1px solid #eee;cursor:pointer}}
+.cidade-item:hover{{background:#f0f9ff}}
+</style>
 </head>
-<body>
-    <div class="container">
-        <h1>🌙 Mapa Astral Online</h1>
-        <form id="f">
-            <fieldset>
-                <legend>Identificação</legend>
-                <input type="text" id="nome" value="Mapa do Momento" required>
-                <div class="row">
-                    <input type="number" id="dia" min="1" max="31" value="{now.day}" required>
-                    <input type="number" id="mes" min="1" max="12" value="{now.month}" required>
-                    <input type="number" id="ano" value="{now.year}" required>
-                    <div style="border:1px solid #ddd; border-radius:4px; padding:8px; text-align:center; background:#f9f9f9;">{now.day:02d}/{now.month:02d}/{now.year}</div>
-                </div>
-                <div class="row">
-                    <input type="number" id="hora" min="0" max="23" value="{now.hour}" required>
-                    <input type="number" id="minuto" min="0" max="59" value="{now.minute}" required>
-                    <input type="number" id="segundo" min="0" max="59" value="{now.second}" required>
-                    <div style="border:1px solid #ddd; border-radius:4px; padding:8px; text-align:center; background:#f9f9f9;">{now.hour:02d}:{now.minute:02d}:{now.second:02d}</div>
-                </div>
-            </fieldset>
-            <fieldset>
-                <legend>Localização</legend>
-                <div class="row2">
-                    <input type="text" id="cidade" value="Brasília" required>
-                    <input type="text" id="estado" value="DF" required>
-                    <input type="text" id="pais" value="Brasil" required>
-                    <button type="button" onclick="alert('Busca em desenvolvimento')">Buscar</button>
-                </div>
-                <div class="row3">
-                    <input type="number" id="latg" min="0" max="90" value="15" required>
-                    <input type="number" id="latm" min="0" max="59" value="46" required>
-                    <input type="number" id="lats" min="0" max="59" value="12" required>
-                    <select id="lath"><option>N</option><option selected>S</option></select>
-                </div>
-                <div class="row3">
-                    <input type="number" id="long" min="0" max="180" value="47" required>
-                    <input type="number" id="lonm" min="0" max="59" value="55" required>
-                    <input type="number" id="lons" min="0" max="59" value="12" required>
-                    <select id="lonh"><option>E</option><option selected>W</option></select>
-                </div>
-                <div class="row2" style="grid-template-columns:100px 1fr;">
-                    <input type="number" id="tz" step="0.5" value="-3" required>
-                    <select><option>W</option><option>E</option></select>
-                </div>
-                <select style="width:100%;"><option>Regiomontanus</option></select>
-            </fieldset>
-            <button type="submit">CALCULAR</button>
-        </form>
-        <div class="loading" id="load">Calculando...</div>
-        <div class="resultado" id="res"><pre id="txt"></pre></div>
-    </div>
-    <script>
-        function dmsToDecimal(g,m,s,h){{let d=Math.abs(g)+Math.abs(m)/60+Math.abs(s)/3600;if(h=='S'||h=='W')d=-d;return d;}}
-        document.getElementById('f').addEventListener('submit',async e=>{{
-            e.preventDefault();
-            let lat=dmsToDecimal(parseInt(document.getElementById('latg').value),parseInt(document.getElementById('latm').value),parseInt(document.getElementById('lats').value),document.getElementById('lath').value);
-            let lon=dmsToDecimal(parseInt(document.getElementById('long').value),parseInt(document.getElementById('lonm').value),parseInt(document.getElementById('lons').value),document.getElementById('lonh').value);
-            let dados={{
-                nome:document.getElementById('nome').value,
-                dia:parseInt(document.getElementById('dia').value),
-                mes:parseInt(document.getElementById('mes').value),
-                ano:parseInt(document.getElementById('ano').value),
-                hora:parseInt(document.getElementById('hora').value),
-                minuto:parseInt(document.getElementById('minuto').value),
-                segundo:parseInt(document.getElementById('segundo').value),
-                latitude:lat,
-                longitude:lon,
-                timezone:parseFloat(document.getElementById('tz').value),
-                cidade:document.getElementById('cidade').value,
-                estado:document.getElementById('estado').value,
-                pais:document.getElementById('pais').value
-            }};
-            document.getElementById('load').style.display='block';
-            document.getElementById('res').style.display='none';
-            let r=await fetch('/api/calcular',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(dados)}});
-            let j=await r.json();
-            document.getElementById('load').style.display='none';
-            if(j.status=='ok'){{document.getElementById('txt').textContent=j.relatorio;document.getElementById('res').style.display='block';}}
-            else alert('Erro: '+j.msg);
-        }});
-    </script>
-</body>
-</html>'''
+<body><div class="container"><h1>🌙 Mapa Astral Online</h1>
+<form id="f">
+<fieldset><legend>Identificação</legend>
+<input type="text" id="nome" value="Mapa do Momento" required>
+<div class="row">
+<input type="number" id="dia" min="1" max="31" value="{now.day}" required>
+<input type="number" id="mes" min="1" max="12" value="{now.month}" required>
+<input type="number" id="ano" value="{now.year}" required>
+<div style="border:1px solid #ddd;border-radius:4px;padding:8px;text-align:center;background:#f9f9f9">{now.day:02d}/{now.month:02d}/{now.year}</div>
+</div>
+<div class="row">
+<input type="number" id="hora" min="0" max="23" value="{now.hour}" required>
+<input type="number" id="minuto" min="0" max="59" value="{now.minute}" required>
+<input type="number" id="segundo" min="0" max="59" value="{now.second}" required>
+<div style="border:1px solid #ddd;border-radius:4px;padding:8px;text-align:center;background:#f9f9f9">{now.hour:02d}:{now.minute:02d}:{now.second:02d}</div>
+</div>
+</fieldset>
+<fieldset><legend>Localização</legend>
+<div class="row2">
+<input type="text" id="cidade" value="Brasília" required>
+<input type="text" id="estado" value="DF" required>
+<input type="text" id="pais" value="Brasil" required>
+<button type="button" onclick="abrirBusca()">Buscar</button>
+</div>
+<div class="row3">
+<input type="number" id="latg" min="0" max="90" value="15" required>
+<input type="number" id="latm" min="0" max="59" value="46" required>
+<input type="number" id="lats" min="0" max="59" value="12" required>
+<select id="lath"><option>N</option><option selected>S</option></select>
+</div>
+<div class="row3">
+<input type="number" id="long" min="0" max="180" value="47" required>
+<input type="number" id="lonm" min="0" max="59" value="55" required>
+<input type="number" id="lons" min="0" max="59" value="12" required>
+<select id="lonh"><option>E</option><option selected>W</option></select>
+</div>
+<div class="row2" style="grid-template-columns:100px 1fr">
+<input type="number" id="tz" step="0.5" value="-3" required>
+<select><option>W</option><option>E</option></select>
+</div>
+<select style="width:100%"><option>Regiomontanus</option></select>
+</fieldset>
+<button type="submit">CALCULAR</button>
+</form>
+<div class="loading" id="load">Calculando...</div>
+<div class="resultado" id="res"><pre id="txt"></pre></div>
+</div>
+
+<div id="modal"><div>
+<h3>Buscar Cidade</h3>
+<input type="text" id="search" placeholder="Digite a cidade..." style="width:100%;padding:10px;margin:10px 0;border:1px solid #ddd;border-radius:4px">
+<div id="cidades-list"></div>
+<button onclick="document.getElementById('modal').style.display='none'" style="margin-top:10px">Fechar</button>
+</div></div>
+
+<script>
+function dmsToDecimal(g,m,s,h){{let d=Math.abs(g)+Math.abs(m)/60+Math.abs(s)/3600;return(h=='S'||h=='W')?-d:d}}
+function abrirBusca(){{document.getElementById('modal').style.display='flex';document.getElementById('search').focus()}}
+document.getElementById('search').addEventListener('input',async e=>{{
+  let q=e.target.value;if(q.length<2){{document.getElementById('cidades-list').innerHTML='';return}}
+  let r=await fetch('/api/cidades?q='+q);let c=await r.json();
+  document.getElementById('cidades-list').innerHTML='';
+  c.forEach(d=>{{
+    let div=document.createElement('div');div.className='cidade-item';
+    div.textContent=d.city+', '+d.state+' - '+d.country;
+    div.onclick=()=>{{
+      document.getElementById('cidade').value=d.city;
+      document.getElementById('estado').value=d.state;
+      document.getElementById('pais').value=d.country;
+      let latD=Math.abs(d.lat),latG=Math.floor(latD),latM=Math.floor((latD-latG)*60),latS=Math.round(((latD-latG)*60-latM)*60);
+      document.getElementById('latg').value=latG;
+      document.getElementById('latm').value=latM;
+      document.getElementById('lats').value=latS;
+      document.getElementById('lath').value=(d.lat<0?'S':'N');
+      let lonD=Math.abs(d.lon),lonG=Math.floor(lonD),lonM=Math.floor((lonD-lonG)*60),lonS=Math.round(((lonD-lonG)*60-lonM)*60);
+      document.getElementById('long').value=lonG;
+      document.getElementById('lonm').value=lonM;
+      document.getElementById('lons').value=lonS;
+      document.getElementById('lonh').value=(d.lon<0?'W':'E');
+      document.getElementById('tz').value=d.tz;
+      document.getElementById('modal').style.display='none';
+    }};
+    document.getElementById('cidades-list').appendChild(div);
+  }})
+}});
+document.getElementById('f').addEventListener('submit',async e=>{{
+  e.preventDefault();
+  let lat=dmsToDecimal(parseInt(document.getElementById('latg').value),parseInt(document.getElementById('latm').value),parseInt(document.getElementById('lats').value),document.getElementById('lath').value);
+  let lon=dmsToDecimal(parseInt(document.getElementById('long').value),parseInt(document.getElementById('lonm').value),parseInt(document.getElementById('lons').value),document.getElementById('lonh').value);
+  let dados={{nome:document.getElementById('nome').value,dia:parseInt(document.getElementById('dia').value),mes:parseInt(document.getElementById('mes').value),ano:parseInt(document.getElementById('ano').value),hora:parseInt(document.getElementById('hora').value),minuto:parseInt(document.getElementById('minuto').value),segundo:parseInt(document.getElementById('segundo').value),latitude:lat,longitude:lon,timezone:parseFloat(document.getElementById('tz').value),cidade:document.getElementById('cidade').value,estado:document.getElementById('estado').value,pais:document.getElementById('pais').value}};
+  document.getElementById('load').style.display='block';document.getElementById('res').style.display='none';
+  let res=await fetch('/api/calcular',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(dados)}});
+  let j=await res.json();document.getElementById('load').style.display='none';
+  if(j.status=='ok'){{document.getElementById('txt').textContent=j.relatorio;document.getElementById('res').style.display='block'}}
+  else alert('Erro: '+j.msg);
+}});
+</script>
+</body></html>'''
 
 
 @app.route('/api/cidades')
@@ -339,14 +454,23 @@ def cidades():
         try:
             with open(cidmundo, 'r', encoding='utf-8', errors='ignore') as f:
                 for line in f:
-                    if line.startswith('#') or not line.strip(): continue
+                    if line.startswith('#') or not line.strip():
+                        continue
                     p = line.split('|')
                     if len(p) >= 9:
                         try:
-                            if q in p[3].lower():
-                                result.append({'city': p[3], 'state': p[2], 'country': p[1], 'lat': float(p[4]),
-                                               'lon': float(p[5]), 'tz': float(p[8])})
-                                if len(result) >= 20: break
+                            city = p[3].lower()
+                            if q in city:
+                                result.append({
+                                    'city': p[3],
+                                    'state': p[2],
+                                    'country': p[1],
+                                    'lat': float(p[4]),
+                                    'lon': float(p[5]),
+                                    'tz': float(p[8])
+                                })
+                                if len(result) >= 20:
+                                    break
                         except:
                             pass
         except:
