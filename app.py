@@ -538,33 +538,73 @@ def index():
             <form id="mapForm">
                 <fieldset>
                     <legend>Identificação</legend>
-                    <input type="text" id="nome" placeholder="Nome completo" value="Mapa do Momento" required>
-                    <div style="position: relative;">
-                        <input type="text" id="cidade" placeholder="Cidade" value="Brasília" required>
-                        <div id="cidades"></div>
-                    </div>
-                    <input type="text" id="estado" placeholder="Estado/UF" value="DF" required>
-                </fieldset>
+                    <input type="text" id="nome" placeholder="Nome do Mapa" value="Mapa do Momento" required>
 
-                <fieldset>
-                    <legend>Data e Hora de Nascimento</legend>
-                    <div class="row">
-                        <input type="number" id="dia" min="1" max="31" value="{now.day}" required>
-                        <input type="number" id="mes" min="1" max="12" value="{now.month}" required>
-                        <input type="number" id="ano" min="1900" max="2100" value="{now.year}" required>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 5px; font-size: 12px;">
+                        <input type="number" id="dia" min="1" max="31" value="{now.day}" title="Dia" style="padding: 6px;" required>
+                        <input type="number" id="mes" min="1" max="12" value="{now.month}" title="Mês" style="padding: 6px;" required>
+                        <input type="number" id="ano" min="1900" max="2100" value="{now.year}" title="Ano" style="padding: 6px;" required>
+                        <div style="border: 1px solid #ddd; border-radius: 4px; padding: 6px; text-align: center; background: #f9f9f9;">
+                            {now.day:02d}/{now.month:02d}/{now.year}
+                        </div>
                     </div>
-                    <div class="row">
-                        <input type="number" id="hora" min="0" max="23" value="{now.hour}" required>
-                        <input type="number" id="minuto" min="0" max="59" value="{now.minute}" required>
-                        <input type="number" id="segundo" min="0" max="59" value="{now.second}" required>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 5px; font-size: 12px; margin-top: 5px;">
+                        <input type="number" id="hora" min="0" max="23" value="{now.hour}" title="Hora" style="padding: 6px;" required>
+                        <input type="number" id="minuto" min="0" max="59" value="{now.minute}" title="Minuto" style="padding: 6px;" required>
+                        <input type="number" id="segundo" min="0" max="59" value="{now.second}" title="Segundo" style="padding: 6px;" required>
+                        <div style="border: 1px solid #ddd; border-radius: 4px; padding: 6px; text-align: center; background: #f9f9f9;">
+                            {now.hour:02d}:{now.minute:02d}:{now.second:02d}
+                        </div>
                     </div>
                 </fieldset>
 
                 <fieldset>
                     <legend>Localização</legend>
-                    <input type="number" id="latitude" step="0.01" value="-15.77" placeholder="Latitude" required>
-                    <input type="number" id="longitude" step="0.01" value="-47.92" placeholder="Longitude" required>
-                    <input type="number" id="timezone" step="0.5" value="-3" placeholder="UTC (ex: -3)" required>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 8px; margin-bottom: 10px;">
+                        <input type="text" id="cidade" placeholder="Cidade" value="Brasília" style="padding: 8px;" required>
+                        <input type="text" id="estado" placeholder="Estado" value="DF" style="padding: 8px;" required>
+                        <input type="text" id="pais" placeholder="País" value="Brasil" style="padding: 8px;" required>
+                        <button type="button" onclick="buscarCidade()" style="width: auto; padding: 8px 12px; margin: 8px 0; font-size: 12px;">Buscar</button>
+                    </div>
+
+                    <div id="cidades" style="display: none; border: 1px solid #ddd; border-radius: 4px; max-height: 150px; overflow-y: auto; margin-bottom: 10px;"></div>
+
+                    <div style="display: grid; grid-template-columns: 80px 80px 80px 50px; gap: 8px; margin-bottom: 10px; font-size: 12px;">
+                        <input type="number" id="lat_graus" min="0" max="90" value="15" placeholder="°" style="padding: 6px;" title="Graus" required>
+                        <input type="number" id="lat_minutos" min="0" max="59" value="46" placeholder="'" style="padding: 6px;" title="Minutos" required>
+                        <input type="number" id="lat_segundos" min="0" max="59" value="12" placeholder="\"" style="padding: 6px;" title="Segundos" required>
+                        <select id="lat_hemis" style="padding: 6px;" required>
+                            <option value="N">N</option>
+                            <option value="S" selected>S</option>
+                        </select>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: 80px 80px 80px 50px; gap: 8px; margin-bottom: 10px; font-size: 12px;">
+                        <input type="number" id="lon_graus" min="0" max="180" value="47" placeholder="°" style="padding: 6px;" title="Graus" required>
+                        <input type="number" id="lon_minutos" min="0" max="59" value="55" placeholder="'" style="padding: 6px;" title="Minutos" required>
+                        <input type="number" id="lon_segundos" min="0" max="59" value="12" placeholder="\"" style="padding: 6px;" title="Segundos" required>
+                        <select id="lon_hemis" style="padding: 6px;" required>
+                            <option value="E">E</option>
+                            <option value="W" selected>W</option>
+                        </select>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: 100px 1fr; gap: 8px; margin-bottom: 10px;">
+                        <input type="number" id="timezone" step="0.5" value="-3" placeholder="UTC" style="padding: 8px;" required>
+                        <select style="padding: 8px;">
+                            <option selected>W</option>
+                            <option>E</option>
+                        </select>
+                    </div>
+
+                    <select style="width: 100%; padding: 8px; margin-bottom: 10px;">
+                        <option selected>Sistema Regiomontanus</option>
+                        <option>Placidus</option>
+                        <option>Koch</option>
+                        <option>Campanus</option>
+                    </select>
                 </fieldset>
 
                 <button type="submit">CALCULAR MAPA ASTRAL</button>
@@ -579,165 +619,253 @@ def index():
         </div>
 
         <script>
-            // Busca de cidades
-            document.getElementById('cidade').addEventListener('input', async (e) => {{
-                const query = e.target.value;
-                if (query.length < 2) {{
-                    document.getElementById('cidades').style.display = 'none';
-                    return;
-                }}
+            // Converter DMS para decimal
+            function dmsToDecimal(graus, minutos, segundos, hemisfério) {
+                let decimal =
+    Math.abs(graus) + Math.abs(minutos) / 60 + Math.abs(segundos) / 3600;
+    if (hemisfério === 'S' | | hemisfério == = 'W') decimal = -decimal;
+    return decimal;
+    }
 
-                try {{
-                    const res = await fetch(`/api/cidades?q=${{query}}`);
-                    const cidades = await res.json();
+    // Busca
+    de
+    cidades
+    function
+    buscarCidade()
+    {
+    const
+    modal = document.createElement('div');
+    modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000;';
 
-                    const div = document.getElementById('cidades');
-                    div.innerHTML = '';
+    modal.innerHTML = `
+    < div
+    style = "background: white; padding: 20px; border-radius: 8px; width: 90%; max-width: 400px;" >
+    < h3 > Buscar
+    Cidade < / h3 >
+    < input
+    type = "text"
+    id = "cidadeSearch"
+    placeholder = "Digite a cidade..."
+    style = "width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 4px;" >
+    < div
+    id = "cidadesList"
+    style = "max-height: 300px; overflow-y: auto; border: 1px solid #ddd; border-radius: 4px;" > < / div >
+    < button
+    onclick = "this.parentElement.parentElement.remove()"
+    style = "width: 100%; padding: 10px; margin-top: 10px; background: #999; color: white; border: none; border-radius: 4px; cursor: pointer;" > Fechar < / button >
 
-                    if (cidades.length > 0) {{
-                        cidades.forEach(c => {{
-                            const item = document.createElement('div');
-                            item.className = 'cidade-item';
-                            item.textContent = `${{c.city}}, ${{c.state}} - ${{c.country}}`;
-                            item.onclick = () => {{
-                                document.getElementById('cidade').value = c.city;
-                                document.getElementById('estado').value = c.state;
-                                document.getElementById('latitude').value = c.lat.toFixed(2);
-                                document.getElementById('longitude').value = c.lon.toFixed(2);
-                                document.getElementById('timezone').value = c.tz.toFixed(1);
-                                div.style.display = 'none';
-                            }};
-                            div.appendChild(item);
-                        }});
-                        div.style.display = 'block';
-                    }}
-                }} catch (e) {{
-                    console.error(e);
-                }}
-            }});
+< / div >
+`;
+document.body.appendChild(modal);
 
-            // Envio do formulário
-            document.getElementById('mapForm').addEventListener('submit', async (e) => {{
-                e.preventDefault();
+document.getElementById('cidadeSearch').addEventListener('input', async (e) = > {
+    const
+q = e.target.value;
+if (q.length < 2)
+{
+    document.getElementById('cidadesList').innerHTML = '';
+return;
+}
 
-                const dados = {{
-                    nome: document.getElementById('nome').value,
-                    dia: parseInt(document.getElementById('dia').value),
-                    mes: parseInt(document.getElementById('mes').value),
-                    ano: parseInt(document.getElementById('ano').value),
-                    hora: parseInt(document.getElementById('hora').value),
-                    minuto: parseInt(document.getElementById('minuto').value),
-                    segundo: parseInt(document.getElementById('segundo').value),
-                    latitude: parseFloat(document.getElementById('latitude').value),
-                    longitude: parseFloat(document.getElementById('longitude').value),
-                    timezone: parseFloat(document.getElementById('timezone').value),
-                    cidade: document.getElementById('cidade').value,
-                    estado: document.getElementById('estado').value,
-                }};
+try {
+const res = await fetch(` / api / cidades?q=${{q}}`);
+const cidades = await res.json();
+const list = document.getElementById('cidadesList');
+list.innerHTML = '';
 
-                document.getElementById('loading').style.display = 'block';
-                document.getElementById('resultado').style.display = 'none';
+cidades.forEach(c = > {
+const item = document.createElement('div');
+item.style.cssText = 'padding: 10px; border-bottom: 1px solid #eee; cursor: pointer;';
+item.textContent = `${{c.city}}, ${{c.state}} - ${{c.country}}`;
+item.onmouseover = () = > item.style.background = '#f0f9ff';
+item.onmouseout = () = > item.style.background = 'white';
+item.onclick = () = > {
+document.getElementById('cidade').value = c.city;
+document.getElementById('estado').value = c.state;
+document.getElementById('pais').value = c.country;
 
-                try {{
-                    const res = await fetch('/api/calcular', {{
-                        method: 'POST',
-                        headers: {{'Content-Type': 'application/json'}},
-                        body: JSON.stringify(dados)
-                    }});
+const latDecimal = Math.abs(c.lat);
+const latGraus = Math.floor(latDecimal);
+const latMin = Math.floor((latDecimal - latGraus) * 60);
+const latSeg = Math.round(((latDecimal - latGraus) * 60 - latMin) * 60);
 
-                    const json = await res.json();
-                    document.getElementById('loading').style.display = 'none';
+document.getElementById('lat_graus').value = latGraus;
+document.getElementById('lat_minutos').value = latMin;
+document.getElementById('lat_segundos').value = latSeg;
+document.getElementById('lat_hemis').value = c.lat < 0 ? 'S': 'N';
 
-                    if (json.status === 'ok') {{
-                        document.getElementById('textoResultado').textContent = json.relatorio;
-                        document.getElementById('resultado').style.display = 'block';
-                    }} else {{
-                        alert('Erro: ' + json.msg);
-                    }}
-                }} catch (e) {{
-                    document.getElementById('loading').style.display = 'none';
-                    alert('Erro de conexão: ' + e.message);
-                }}
-            }});
+const
+lonDecimal = Math.abs(c.lon);
+const
+lonGraus = Math.floor(lonDecimal);
+const
+lonMin = Math.floor((lonDecimal - lonGraus) * 60);
+const
+lonSeg = Math.round(((lonDecimal - lonGraus) * 60 - lonMin) * 60);
 
-            function fecharResultado() {{
-                document.getElementById('resultado').style.display = 'none';
-            }}
-        </script>
-    </body>
-    </html>
-    """
-    return html
+document.getElementById('lon_graus').value = lonGraus;
+document.getElementById('lon_minutos').value = lonMin;
+document.getElementById('lon_segundos').value = lonSeg;
+document.getElementById('lon_hemis').value = c.lon < 0 ? 'W': 'E';
 
+document.getElementById('timezone').value = c.tz.toFixed(1);
+modal.remove();
+};
+list.appendChild(item);
+});
+}} catch(e)
+{{
+    console.error(e);
+}}
+});
 
-@app.route('/api/cidades')
-def buscar_cidades():
-    q = request.args.get('q', '').lower()
-    try:
-        cidmundo_path = os.path.join(os.path.dirname(__file__), 'CidMundo.txt')
+document.getElementById('cidadeSearch').focus();
+}
 
-        cidades = []
-        if os.path.exists(cidmundo_path):
-            with open(cidmundo_path, 'r', encoding='utf-8', errors='ignore') as f:
-                for line in f:
-                    if line.startswith('#') or not line.strip():
-                        continue
-                    parts = line.split('|')
-                    if len(parts) >= 9:
-                        try:
-                            city = parts[3].lower()
-                            if q in city:
-                                cidades.append({
-                                    'city': parts[3],
-                                    'state': parts[2],
-                                    'country': parts[1],
-                                    'lat': float(parts[4]),
-                                    'lon': float(parts[5]),
-                                    'tz': float(parts[8])
-                                })
-                                if len(cidades) >= 20:
-                                    break
-                        except:
-                            pass
+// Envio
+do
+formulário
+document.getElementById('mapForm').addEventListener('submit', async (e) = > {{
+    e.preventDefault();
 
-        return jsonify(cidades)
-    except Exception as e:
-        return jsonify({'erro': str(e)}), 400
+const
+latitude = dmsToDecimal(
+parseInt(document.getElementById('lat_graus').value),
+parseInt(document.getElementById('lat_minutos').value),
+parseInt(document.getElementById('lat_segundos').value),
+document.getElementById('lat_hemis').value
+);
 
+const
+longitude = dmsToDecimal(
+parseInt(document.getElementById('lon_graus').value),
+parseInt(document.getElementById('lon_minutos').value),
+parseInt(document.getElementById('lon_segundos').value),
+document.getElementById('lon_hemis').value
+);
 
-@app.route('/api/calcular', methods=['POST'])
-def calcular():
-    try:
-        dados = request.json
+const
+dados = {{
+    nome: document.getElementById('nome').value,
+    dia: parseInt(document.getElementById('dia').value),
+    mes: parseInt(document.getElementById('mes').value),
+    ano: parseInt(document.getElementById('ano').value),
+    hora: parseInt(document.getElementById('hora').value),
+    minuto: parseInt(document.getElementById('minuto').value),
+    segundo: parseInt(document.getElementById('segundo').value),
+    latitude: latitude,
+    longitude: longitude,
+    timezone: parseFloat(document.getElementById('timezone').value),
+    cidade: document.getElementById('cidade').value,
+    estado: document.getElementById('estado').value,
+    pais: document.getElementById('pais').value,
+}};
 
-        mapa = MapaAstral(
-            nome_mapa=dados.get('nome', 'Mapa'),
-            dia=int(dados['dia']),
-            mes=int(dados['mes']),
-            ano=int(dados['ano']),
-            hora=int(dados['hora']),
-            minuto=int(dados['minuto']),
-            segundo=int(dados['segundo']),
-            latitude_dec=float(dados['latitude']),
-            longitude_dec=float(dados['longitude']),
-            timezone_horas=float(dados['timezone']),
-            cidade=dados.get('cidade', ''),
-            estado=dados.get('estado', ''),
-            pais=dados.get('pais', 'Brasil')
-        )
+document.getElementById('loading').style.display = 'block';
+document.getElementById('resultado').style.display = 'none';
 
-        relatorio = mapa.gerar_relatorio()
+try {{
+const res = await fetch('/api/calcular', {{
+method: 'POST',
+headers: {{'Content-Type': 'application/json'}},
+body: JSON.stringify(dados)
+}});
 
-        return jsonify({
-            'status': 'ok',
-            'relatorio': relatorio,
-            'planetas_count': len(mapa.planetas),
-            'aspectos_count': len(mapa.aspectos_natais),
-            'transitos_count': len(mapa.transitos)
-        })
-    except Exception as e:
-        return jsonify({'status': 'erro', 'msg': str(e)}), 400
+const
+json = await res.json();
+document.getElementById('loading').style.display = 'none';
 
+if (json.status === 'ok')
+{{
+    document.getElementById('textoResultado').textContent = json.relatorio;
+document.getElementById('resultado').style.display = 'block';
+}} else {{
+    alert('Erro: ' + json.msg);
+}}
+}} catch(e)
+{{
+    document.getElementById('loading').style.display = 'none';
+alert('Erro de conexão: ' + e.message);
+}}
+}});
 
-if __name__ == '__main__':
-    app.run(debug=True)
+function
+fecharResultado()
+{{
+    document.getElementById('resultado').style.display = 'none';
+}}
+< / script >
+    < / body >
+        < / html > \
+            """
+      return html
+  
+  @app.route('/api/cidades')
+  def buscar_cidades():
+      q = request.args.get('q', '').lower()
+      try:
+          cidmundo_path = os.path.join(os.path.dirname(__file__), 'CidMundo.txt')
+  
+          cidades = []
+          if os.path.exists(cidmundo_path):
+              with open(cidmundo_path, 'r', encoding='utf-8', errors='ignore') as f:
+                  for line in f:
+                      if line.startswith('#') or not line.strip():
+                          continue
+                      parts = line.split('|')
+                      if len(parts) >= 9:
+                          try:
+                              city = parts[3].lower()
+                              if q in city:
+                                  cidades.append({
+                                      'city': parts[3],
+                                      'state': parts[2],
+                                      'country': parts[1],
+                                      'lat': float(parts[4]),
+                                      'lon': float(parts[5]),
+                                      'tz': float(parts[8])
+                                  })
+                                  if len(cidades) >= 20:
+                                      break
+                          except:
+                              pass
+  
+          return jsonify(cidades)
+      except Exception as e:
+          return jsonify({'erro': str(e)}), 400
+  
+  @app.route('/api/calcular', methods=['POST'])
+  def calcular():
+      try:
+          dados = request.json
+  
+          mapa = MapaAstral(
+              nome_mapa=dados.get('nome', 'Mapa'),
+              dia=int(dados['dia']),
+              mes=int(dados['mes']),
+              ano=int(dados['ano']),
+              hora=int(dados['hora']),
+              minuto=int(dados['minuto']),
+              segundo=int(dados['segundo']),
+              latitude_dec=float(dados['latitude']),
+              longitude_dec=float(dados['longitude']),
+              timezone_horas=float(dados['timezone']),
+              cidade=dados.get('cidade', ''),
+              estado=dados.get('estado', ''),
+              pais=dados.get('pais', 'Brasil')
+          )
+  
+          relatorio = mapa.gerar_relatorio()
+  
+          return jsonify({
+              'status': 'ok',
+              'relatorio': relatorio,
+              'planetas_count': len(mapa.planetas),
+              'aspectos_count': len(mapa.aspectos_natais),
+              'transitos_count': len(mapa.transitos)
+          })
+      except Exception as e:
+          return jsonify({'status': 'erro', 'msg': str(e)}), 400
+  
+  if __name__ == '__main__':
+      app.run(debug=True)
