@@ -1,9 +1,7 @@
 # -*- coding: utf-8 -*-
 import os
-import math
-import unicodedata
 from datetime import datetime, timedelta
-from typing import Dict, List, Tuple, Optional
+from typing import Tuple
 from dataclasses import dataclass
 from flask import Flask, request, jsonify
 
@@ -14,7 +12,6 @@ except:
 
 app = Flask(__name__)
 
-# CONSTANTES
 ASPECTOS = {
     'CJN': (0.0, 8.0), 'OPO': (180.0, 8.0), 'TRI': (120.0, 8.0),
     'SQR': (90.0, 6.0), 'SXT': (60.0, 6.0), 'QCX': (150.0, 3.0),
@@ -30,7 +27,6 @@ PLANETAS = {
 PLANETA_REV = {v: k for k, v in PLANETAS.items()}
 
 
-# CLASSES DE DADOS
 @dataclass
 class Corpo:
     nome: str
@@ -40,7 +36,6 @@ class Corpo:
     mov: str
     signo: str
     pos_str: str
-    decl: Optional[float] = None
 
 
 @dataclass
@@ -63,11 +58,6 @@ class EventoAstral:
 
     def __lt__(self, other):
         return self.jd_exato < other.jd_exato
-
-
-# FUNÇÕES AUXILIARES
-def strip_accents(s: str) -> str:
-    return ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
 
 
 def graus_para_dms(graus):
@@ -104,7 +94,6 @@ def jd_para_datetime(jd, tz_offset=0.0):
 
 
 def dias_para_hms(dias: float) -> str:
-    """Converte dias decimais em formato HH:MM:SS"""
     dias = abs(dias)
     horas = dias * 24
     h = int(horas)
@@ -125,7 +114,6 @@ def calcular_declinacao_planeta(jd: float, planeta: int) -> float:
 
 
 def determinar_intervalo(planeta1: int, planeta2: int) -> float:
-    """Intervalo de busca baseado na velocidade dos planetas"""
     planeta_lento = max(planeta1, planeta2)
     intervalos = {
         swe.MOON: 0.01, swe.MERCURY: 0.05, swe.VENUS: 0.05, swe.SUN: 0.05,
@@ -137,10 +125,8 @@ def determinar_intervalo(planeta1: int, planeta2: int) -> float:
 
 def buscar_transito_exato(jd_inicio: float, jd_fim: float, planeta1: int, planeta2: int,
                           angulo_aspecto: float, orbe: float) -> Tuple[float, float]:
-    """Busca o momento exato de um trânsito usando bissecção e método da secante"""
     NUM_SAMPLES = 12
     BISSECCOES_MAX = 6
-    SECANTE_JUMP_MAX = 1.0
     DELTA_MIN = 1.0e-10
     ORBE_LIMITE = orbe * 1.5
 
@@ -194,37 +180,10 @@ def buscar_transito_exato(jd_inicio: float, jd_fim: float, planeta1: int, planet
         else:
             jd1 = jd_meio
 
-    jd = melhor_jd
-    dx = (jd2 - jd1) / 4
-
-    for _ in range(20):
-        jd_ant = jd
-        jd_prox = jd + dx
-        orbe_ant = calcular_orbe_atual(jd_ant)
-        orbe_prox = calcular_orbe_atual(jd_prox)
-
-        if abs(orbe_prox - orbe_ant) < DELTA_MIN:
-            break
-
-        dx = -orbe_ant * (jd_prox - jd_ant) / (orbe_prox - orbe_ant)
-        if abs(dx) > SECANTE_JUMP_MAX:
-            dx = SECANTE_JUMP_MAX if dx > 0 else -SECANTE_JUMP_MAX
-
-        jd = jd_ant + dx
-        orbe = abs(calcular_orbe_atual(jd))
-
-        if orbe < melhor_orbe:
-            melhor_orbe = orbe
-            melhor_jd = jd
-
-        if orbe <= 0.001 or abs(dx) < 0.0001:
-            return jd, orbe
-
     return melhor_jd, melhor_orbe if melhor_orbe <= orbe else (0, 999)
 
 
 def buscar_mudanca_signo_exata(jd1: float, jd2: float, planeta: int, signo_saida: int) -> float:
-    """Encontra o momento exato de mudança de signo usando bissecção"""
     BISSECCOES_MAX = 20
     DELTA_MIN = 1.0e-12
 
@@ -247,16 +206,16 @@ def buscar_mudanca_signo_exata(jd1: float, jd2: float, planeta: int, signo_saida
     return (jd1 + jd2) / 2
 
 
-# CLASSE PRINCIPAL
 class MapaAstral:
     def __init__(self, nome_mapa, dia, mes, ano, hora, minuto, segundo,
-                 latitude_dec, longitude_dec, timezone_horas, cidade='', estado='', pais=''):
+                 latitude_dec, longitude_dec, timezone_horas, cidade='', estado='', pais='', house_system_label='Regiomontanus'):
         self.nome_mapa = nome_mapa.strip()
         self.dia, self.mes, self.ano = dia, mes, ano
         self.hora, self.minuto, self.segundo = hora, minuto, segundo
         self.latitude, self.longitude = latitude_dec, longitude_dec
         self.timezone_horas = timezone_horas
         self.cidade, self.estado, self.pais = cidade, estado, pais
+        self.house_system_label = house_system_label
 
         self.dt_local = datetime(ano, mes, dia, hora, minuto, segundo)
         self.dt_utc = self.dt_local - timedelta(hours=timezone_horas)
@@ -279,9 +238,7 @@ class MapaAstral:
             lon, lat, lon_speed = float(pos[0]), float(pos[1]), float(pos[3])
             mov = 'dir' if lon_speed >= 0 else 'ret'
             signo, pos_str = graus_para_signo_posicao(lon)
-            eq, _ = swe.calc_ut(self.jd, code, swe.FLG_SWIEPH | swe.FLG_EQUATORIAL)
-            decl = float(eq[1])
-            self.planetas[nome] = Corpo(nome, lon, lat, lon_speed, mov, signo, pos_str, decl)
+            self.planetas[nome] = Corpo(nome, lon, lat, lon_speed, mov, signo, pos_str)
 
     def calcular_casas(self):
         self.casas.clear()
@@ -310,7 +267,6 @@ class MapaAstral:
                         })
 
     def _deduplicate_transitos(self, janela_tempo: float = 0.15) -> None:
-        """Remove duplicatas de trânsitos mantendo apenas o com menor orbe"""
         if not self.transitos:
             return
 
@@ -485,7 +441,7 @@ class MapaAstral:
             self.eventos_astral.append(evento)
 
         for voc in self.voc_periodos:
-            descricao = f"LUA Fora de Curso durante {voc['duracao_hms']} até entrar em {voc['signo_entrada']}"
+            descricao = f"LUA Fora de Curso durante {voc['duracao_hms']} ate entrar em {voc['signo_entrada']}"
             evento = EventoAstral(voc['jd_inicio'], 'voc', descricao)
             self.eventos_astral.append(evento)
 
@@ -504,11 +460,10 @@ class MapaAstral:
         rel.append("=" * 100)
         rel.append(self.nome_mapa or "MAPA ASTRAL COMPLETO")
         rel.append("=" * 100)
-        rel.append(
-            f"Data: {self.dia:02d}/{self.mes:02d}/{self.ano}  Hora: {self.hora:02d}:{self.minuto:02d}:{self.segundo:02d} (UTC {self.timezone_horas:+.1f}h)")
+        rel.append(f"Data: {self.dia:02d}/{self.mes:02d}/{self.ano}  Hora: {self.hora:02d}:{self.minuto:02d}:{self.segundo:02d} (UTC {self.timezone_horas:+.1f}h)")
         if self.cidade or self.estado or self.pais:
             rel.append(f"Local: {self.cidade} / {self.estado} / {self.pais}")
-        rel.append(f"Lat: {self.latitude:.6f}°  Lon: {self.longitude:.6f}°")
+        rel.append(f"Lat: {self.latitude:.6f}  Lon: {self.longitude:.6f}")
         rel.append("=" * 100)
         rel.append("")
 
@@ -521,7 +476,7 @@ class MapaAstral:
                 rel.append(f"{nome:3s} [{c.pos_str} {c.signo}] {mov}")
 
         rel.append("")
-        rel.append("CASAS:")
+        rel.append(f"CASAS TERRESTRES por {self.house_system_label}")
         rel.append("-" * 100)
         for num in range(1, 13):
             c = self.casas[num]
@@ -531,12 +486,12 @@ class MapaAstral:
         rel.append(f"ASPECTOS ({len(self.aspectos_natais)}):")
         rel.append("-" * 100)
         for asp in sorted(self.aspectos_natais, key=lambda x: x['orbe']):
-            linha = f"{asp['p1']:3s} [{asp['pos1']} {asp['sig1']}] {asp['cod']} {asp['p2']:3s} [{asp['pos2']} {asp['sig2']}] - Orbe: {asp['orbe']:.2f}°"
+            linha = f"{asp['p1']:3s} [{asp['pos1']} {asp['sig1']}] {asp['cod']} {asp['p2']:3s} [{asp['pos2']} {asp['sig2']}] - Orbe: {asp['orbe']:.2f}"
             rel.append(linha)
 
         rel.append("")
         rel.append("=" * 100)
-        rel.append(f"TRÂNSITOS, ENTRADAS E VOC ({len(self.eventos_astral)}):")
+        rel.append(f"TRANSITOS, ENTRADAS E VOC ({len(self.eventos_astral)}):")
         rel.append("-" * 100)
 
         momento_mapa = self.jd
@@ -550,8 +505,7 @@ class MapaAstral:
 
             dt_evento = jd_para_datetime(evento.jd_exato, self.timezone_horas)
             dt_str = dt_evento.strftime('%d/%m/%Y %H:%M:%S')
-            linha = f"{dt_str} - {evento.descricao}"
-            rel.append(linha)
+            rel.append(f"{dt_str} - {evento.descricao}")
 
         if not rel_mostrou_mapa:
             dt_mapa = jd_para_datetime(momento_mapa, self.timezone_horas)
@@ -560,79 +514,89 @@ class MapaAstral:
         rel.append("")
         rel.append("=" * 100)
         rel.append("")
-        rel.append("ASTRO-ANÁLISE")
+        rel.append("ASTRO-ANALISE")
         rel.append("PROGRAMA FEITO POR ADONIS SALIBA (Out 2025)")
         rel.append("(uso gratuito e franqueado)")
         rel.append("")
-        rel.append("Para análise do mapa horário por IA:")
+        rel.append("Para analise do mapa horario por IA:")
         rel.append("https://chatgpt.com/g/g-EumgPewMI-astrologia-horaria-guia")
         rel.append("")
         rel.append("=" * 100)
+
         return "\n".join(rel)
 
 
-# ROTAS
 @app.route('/')
 def index():
     now = datetime.now()
-    return f'''<!DOCTYPE html>
+    html = '''<!DOCTYPE html>
 <html lang="pt-BR">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Mapa Astral</title>
-<style>*{{margin:0;padding:0;box-sizing:border-box}}body{{font-family:Arial;background:linear-gradient(135deg,#667eea,#764ba2);min-height:100vh;padding:20px}}
-.container{{max-width:680px;margin:0 auto;background:white;border-radius:12px;padding:25px;box-shadow:0 20px 60px rgba(0,0,0,0.3)}}h1{{text-align:center;color:#333;margin-bottom:18px;font-size:24px}}
-fieldset{{border:1px solid #ddd;border-radius:8px;padding:12px;margin-bottom:15px}}legend{{padding:0 8px;color:#667eea;font-weight:bold;font-size:13px}}
-input,select{{padding:5px;margin:3px 0;border:1px solid #ddd;border-radius:4px;font-size:11px}}
-label{{font-size:11px;color:#555;display:block;margin-top:4px;margin-bottom:2px}}
-.row{{display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-bottom:8px}}
-.row3{{display:grid;grid-template-columns:60px 60px 60px 45px;gap:3px;margin-bottom:8px}}
-.row2{{display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:6px;margin-bottom:8px}}
-.rowtz{{display:grid;grid-template-columns:100px 1fr;gap:6px;margin-bottom:8px}}
-button{{width:100%;padding:8px;background:linear-gradient(135deg,#667eea,#764ba2);color:white;border:none;border-radius:4px;cursor:pointer;font-weight:bold;font-size:12px}}
-button:hover{{transform:translateY(-2px)}}
-.resultado{{margin-top:20px;padding:15px;background:#f0f9ff;border-radius:8px;display:none;max-height:500px;overflow-y:auto}}
-.resultado pre{{font-family:monospace;font-size:10px;color:#1e3a8a}}
-.loading{{display:none;text-align:center;color:#667eea;font-weight:bold;font-size:12px}}
-#modal{{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center}}
-#modal>div{{background:white;padding:20px;border-radius:8px;width:90%;max-width:400px}}
-#cidades-list{{max-height:200px;overflow-y:auto;border:1px solid #ddd;border-radius:4px}}
-.cidade-item{{padding:8px;border-bottom:1px solid #eee;cursor:pointer;font-size:11px}}
-.cidade-item:hover{{background:#f0f9ff}}
-.btn-copy{{margin-top:10px;width:auto;display:inline-block;padding:6px 12px;font-size:11px}}
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:Arial;background:linear-gradient(135deg,#667eea,#764ba2);min-height:100vh;padding:20px}
+.container{max-width:680px;margin:0 auto;background:white;border-radius:12px;padding:25px;box-shadow:0 20px 60px rgba(0,0,0,0.3)}
+h1{text-align:center;color:#333;margin-bottom:18px;font-size:24px}
+fieldset{border:1px solid #ddd;border-radius:8px;padding:12px;margin-bottom:15px}
+legend{padding:0 8px;color:#667eea;font-weight:bold;font-size:13px}
+input,select{padding:5px;margin:3px 0;border:1px solid #ddd;border-radius:4px;font-size:11px}
+label{font-size:11px;color:#555;display:block;margin-top:4px;margin-bottom:2px}
+.row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-bottom:8px}
+.row3{display:grid;grid-template-columns:60px 60px 60px 45px;gap:3px;margin-bottom:8px}
+.row2{display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:6px;margin-bottom:8px}
+.rowtz{display:grid;grid-template-columns:100px 1fr;gap:6px;margin-bottom:8px}
+button{width:100%;padding:8px;background:linear-gradient(135deg,#667eea,#764ba2);color:white;border:none;border-radius:4px;cursor:pointer;font-weight:bold;font-size:12px}
+button:hover{transform:translateY(-2px)}
+.resultado{margin-top:20px;padding:15px;background:#f0f9ff;border-radius:8px;display:none;max-height:500px;overflow-y:auto}
+.resultado pre{font-family:monospace;font-size:10px;color:#1e3a8a}
+.loading{display:none;text-align:center;color:#667eea;font-weight:bold;font-size:12px}
+#modal{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center}
+#modal>div{background:white;padding:20px;border-radius:8px;width:90%;max-width:400px}
+#cidades-list{max-height:200px;overflow-y:auto;border:1px solid #ddd;border-radius:4px}
+.cidade-item{padding:8px;border-bottom:1px solid #eee;cursor:pointer;font-size:11px}
+.cidade-item:hover{background:#f0f9ff}
+.btn-copy{margin-top:10px;width:auto;display:inline-block;padding:6px 12px;font-size:11px}
 </style>
 </head>
-<body><div class="container"><h1>🌙 Mapa Astral Online</h1>
+<body>
+<div class="container">
+<h1>Mapa Astral Online</h1>
 <form id="f">
-<fieldset><legend>Identificação</legend>
+<fieldset>
+<legend>Identificacao</legend>
 <input type="text" id="nome" value="Mapa do Momento" required style="width:100%">
-<label>Dia / Mês / Ano</label>
+<label>Dia / Mes / Ano</label>
 <div class="row">
-<input type="number" id="dia" min="1" max="31" value="{now.day}" required>
-<input type="number" id="mes" min="1" max="12" value="{now.month}" required>
-<input type="number" id="ano" value="{now.year}" required>
+<input type="number" id="dia" min="1" max="31" value="''' + str(now.day) + '''" required>
+<input type="number" id="mes" min="1" max="12" value="''' + str(now.month) + '''" required>
+<input type="number" id="ano" value="''' + str(now.year) + '''" required>
 </div>
 <label>Hora / Min / Seg (Hora Local)</label>
 <div class="row">
-<input type="number" id="hora" min="0" max="23" value="{now.hour}" required>
-<input type="number" id="minuto" min="0" max="59" value="{now.minute}" required>
-<input type="number" id="segundo" min="0" max="59" value="{now.second}" required>
+<input type="number" id="hora" min="0" max="23" value="''' + str(now.hour) + '''" required>
+<input type="number" id="minuto" min="0" max="59" value="''' + str(now.minute) + '''" required>
+<input type="number" id="segundo" min="0" max="59" value="''' + str(now.second) + '''" required>
 </div>
 </fieldset>
-<fieldset><legend>Localização</legend>
+<fieldset>
+<legend>Localizacao</legend>
 <div class="row2">
-<input type="text" id="cidade" value="Brasília" required placeholder="Cidade">
+<input type="text" id="cidade" value="Brasilia" required placeholder="Cidade">
 <input type="text" id="estado" value="DF" required placeholder="Estado">
-<input type="text" id="pais" value="Brasil" required placeholder="País">
+<input type="text" id="pais" value="Brasil" required placeholder="Pais">
 <button type="button" onclick="abrirBusca()" style="width:auto;padding:5px 10px">Buscar</button>
 </div>
-<label>Latitude ... º  '  "</label>
+<label>Latitude ... graus  minutos  segundos</label>
 <div class="row3">
 <input type="number" id="latg" min="0" max="90" value="15" required>
 <input type="number" id="latm" min="0" max="59" value="46" required>
 <input type="number" id="lats" min="0" max="59" value="12" required>
 <select id="lath" style="width:100%"><option>N</option><option selected>S</option></select>
 </div>
-<label>Longitude ... º '  "</label>
+<label>Longitude ... graus minutos segundos</label>
 <div class="row3">
 <input type="number" id="long" min="0" max="180" value="47" required>
 <input type="number" id="lonm" min="0" max="59" value="55" required>
@@ -642,10 +606,9 @@ button:hover{{transform:translateY(-2px)}}
 <label>Zona de Tempo (UTC)</label>
 <div class="rowtz">
 <input type="number" id="tz" step="0.5" value="-3" required style="width:100%">
-<select style="width:100%;display:none"><option>W</option><option>E</option></select>
 </div>
 <label>Casas Terrestres</label>
-<select style="width:100%">
+<select id="houseSys" style="width:100%">
 <option>Regiomontanus</option>
 <option>Placidus</option>
 <option>Campanus</option>
@@ -659,7 +622,7 @@ button:hover{{transform:translateY(-2px)}}
 <button type="submit">CALCULAR</button>
 </form>
 <div class="loading" id="load">Calculando...</div>
-<div class="resultado" id="res"><pre id="txt"></pre><button class="btn-copy" onclick="copiarResultado()">📋 Copiar Texto</button></div>
+<div class="resultado" id="res"><pre id="txt"></pre><button class="btn-copy" onclick="copiarResultado()">Copiar Texto</button></div>
 </div>
 
 <div id="modal"><div>
@@ -670,113 +633,109 @@ button:hover{{transform:translateY(-2px)}}
 </div></div>
 
 <script>
-function dmsToDecimal(g,m,s,h){{let d=Math.abs(g)+Math.abs(m)/60+Math.abs(s)/3600;return(h=='S'||h=='W')?-d:d}}
-function copiarResultado(){{let txt=document.getElementById('txt').textContent;navigator.clipboard.writeText(txt).then(()=>{{alert('Texto copiado para a memória!')}}).catch(()=>{{alert('Erro ao copiar!')}})}}
+function dmsToDecimal(g, m, s, h) {
+  let d = Math.abs(g) + Math.abs(m)/60 + Math.abs(s)/3600;
+  return (h == 'S' || h == 'W') ? -d : d;
+}
 
-function atualizarHoraLocal() {{
-  let tz = parseFloat(document.getElementById('tz').value);
-  let dia = parseInt(document.getElementById('dia').value);
-  let mes = parseInt(document.getElementById('mes').value);
-  let ano = parseInt(document.getElementById('ano').value);
-  let hora = parseInt(document.getElementById('hora').value);
-  let minuto = parseInt(document.getElementById('minuto').value);
-  let segundo = parseInt(document.getElementById('segundo').value);
+function copiarResultado() {
+  let txt = document.getElementById('txt').textContent;
+  navigator.clipboard.writeText(txt).then(function() {
+    alert('Texto copiado para memoria!');
+  });
+}
 
-  let utcDate = new Date(Date.UTC(ano, mes-1, dia, hora, minuto, segundo));
-  let localDate = new Date(utcDate.getTime() + (tz * 60 * 60 * 1000));
+function abrirBusca() {
+  document.getElementById('modal').style.display = 'flex';
+  document.getElementById('search').focus();
+}
 
-  document.getElementById('hora').value = localDate.getUTCHours();
-  document.getElementById('minuto').value = localDate.getUTCMinutes();
-  document.getElementById('segundo').value = localDate.getUTCSeconds();
-}}
-
-window.addEventListener('load', function() {{
-  atualizarHoraLocal();
-  document.getElementById('tz').addEventListener('change', atualizarHoraLocal);
-}});
-
-function abrirBusca(){{document.getElementById('modal').style.display='flex';document.getElementById('search').focus()}}
-document.getElementById('search').addEventListener('input',async e=>{{
-  let q=e.target.value;if(q.length<2){{document.getElementById('cidades-list').innerHTML='';return}}
-  let r=await fetch('/api/cidades?q='+q);let c=await r.json();
-  document.getElementById('cidades-list').innerHTML='';
-  c.forEach(d=>{{
-    let div=document.createElement('div');div.className='cidade-item';
-    div.textContent=d.city+', '+d.state+' - '+d.country;
-    div.onclick=()=>{{
-      document.getElementById('cidade').value=d.city;
-      document.getElementById('estado').value=d.state;
-      document.getElementById('pais').value=d.country;
-      let latD=Math.abs(d.lat),latG=Math.floor(latD),latM=Math.floor((latD-latG)*60),latS=Math.round(((latD-latG)*60-latM)*60);
-      document.getElementById('latg').value=latG;
-      document.getElementById('latm').value=latM;
-      document.getElementById('lats').value=latS;
-      document.getElementById('lath').value=(d.lat<0?'S':'N');
-      let lonD=Math.abs(d.lon),lonG=Math.floor(lonD),lonM=Math.floor((lonD-lonG)*60),lonS=Math.round(((lonD-lonG)*60-lonM)*60);
-      document.getElementById('long').value=lonG;
-      document.getElementById('lonm').value=lonM;
-      document.getElementById('lons').value=lonS;
-      document.getElementById('lonh').value=(d.lon<0?'W':'E');
-      document.getElementById('tz').value=d.tz;
-      atualizarHoraLocal();
-      document.getElementById('modal').style.display='none';
-    }};
+document.getElementById('search').addEventListener('input', async function(e) {
+  let q = e.target.value;
+  if (q.length < 2) {
+    document.getElementById('cidades-list').innerHTML = '';
+    return;
+  }
+  let r = await fetch('/api/cidades?q=' + q);
+  let c = await r.json();
+  document.getElementById('cidades-list').innerHTML = '';
+  c.forEach(function(d) {
+    let div = document.createElement('div');
+    div.className = 'cidade-item';
+    div.textContent = d.city + ', ' + d.state + ' - ' + d.country;
+    div.onclick = function() {
+      document.getElementById('cidade').value = d.city;
+      document.getElementById('estado').value = d.state;
+      document.getElementById('pais').value = d.country;
+      let latD = Math.abs(d.lat);
+      let latG = Math.floor(latD);
+      let latM = Math.floor((latD - latG) * 60);
+      let latS = Math.round(((latD - latG) * 60 - latM) * 60);
+      document.getElementById('latg').value = latG;
+      document.getElementById('latm').value = latM;
+      document.getElementById('lats').value = latS;
+      document.getElementById('lath').value = (d.lat < 0 ? 'S' : 'N');
+      let lonD = Math.abs(d.lon);
+      let lonG = Math.floor(lonD);
+      let lonM = Math.floor((lonD - lonG) * 60);
+      let lonS = Math.round(((lonD - lonG) * 60 - lonM) * 60);
+      document.getElementById('long').value = lonG;
+      document.getElementById('lonm').value = lonM;
+      document.getElementById('lons').value = lonS;
+      document.getElementById('lonh').value = (d.lon < 0 ? 'W' : 'E');
+      document.getElementById('tz').value = d.tz;
+      document.getElementById('modal').style.display = 'none';
+    };
     document.getElementById('cidades-list').appendChild(div);
-  }})
-}});
-document.getElementById('f').addEventListener('submit',async e=>{{
+  });
+});
+
+document.getElementById('f').addEventListener('submit', async function(e) {
   e.preventDefault();
-  let lat=dmsToDecimal(parseInt(document.getElementById('latg').value),parseInt(document.getElementById('latm').value),parseInt(document.getElementById('lats').value),document.getElementById('lath').value);
-  let lon=dmsToDecimal(parseInt(document.getElementById('long').value),parseInt(document.getElementById('lonm').value),parseInt(document.getElementById('lons').value),document.getElementById('lonh').value);
-  let dados={{nome:document.getElementById('nome').value,dia:parseInt(document.getElementById('dia').value),mes:parseInt(document.getElementById('mes').value),ano:parseInt(document.getElementById('ano').value),hora:parseInt(document.getElementById('hora').value),minuto:parseInt(document.getElementById('minuto').value),segundo:parseInt(document.getElementById('segundo').value),latitude:lat,longitude:lon,timezone:parseFloat(document.getElementById('tz').value),cidade:document.getElementById('cidade').value,estado:document.getElementById('estado').value,pais:document.getElementById('pais').value}};
-  document.getElementById('load').style.display='block';document.getElementById('res').style.display='none';
-  let res=await fetch('/api/calcular',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(dados)}});
-  let j=await res.json();document.getElementById('load').style.display='none';
-  if(j.status=='ok'){{document.getElementById('txt').textContent=j.relatorio;document.getElementById('res').style.display='block'}}
-  else alert('Erro: '+j.msg);
-}});
+  let lat = dmsToDecimal(parseInt(document.getElementById('latg').value), 
+                         parseInt(document.getElementById('latm').value), 
+                         parseInt(document.getElementById('lats').value), 
+                         document.getElementById('lath').value);
+  let lon = dmsToDecimal(parseInt(document.getElementById('long').value), 
+                         parseInt(document.getElementById('lonm').value), 
+                         parseInt(document.getElementById('lons').value), 
+                         document.getElementById('lonh').value);
+  let dados = {
+    nome: document.getElementById('nome').value,
+    dia: parseInt(document.getElementById('dia').value),
+    mes: parseInt(document.getElementById('mes').value),
+    ano: parseInt(document.getElementById('ano').value),
+    hora: parseInt(document.getElementById('hora').value),
+    minuto: parseInt(document.getElementById('minuto').value),
+    segundo: parseInt(document.getElementById('segundo').value),
+    latitude: lat,
+    longitude: lon,
+    timezone: parseFloat(document.getElementById('tz').value),
+    cidade: document.getElementById('cidade').value,
+    estado: document.getElementById('estado').value,
+    pais: document.getElementById('pais').value,
+    houseSys: document.getElementById('houseSys').value
+  };
+  document.getElementById('load').style.display = 'block';
+  document.getElementById('res').style.display = 'none';
+  let res = await fetch('/api/calcular', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(dados)
+  });
+  let j = await res.json();
+  document.getElementById('load').style.display = 'none';
+  if (j.status == 'ok') {
+    document.getElementById('txt').textContent = j.relatorio;
+    document.getElementById('res').style.display = 'block';
+  } else {
+    alert('Erro: ' + j.msg);
+  }
+});
 </script>
-function abrirBusca(){{document.getElementById('modal').style.display='flex';document.getElementById('search').focus()}}
-document.getElementById('search').addEventListener('input',async e=>{{
-  let q=e.target.value;if(q.length<2){{document.getElementById('cidades-list').innerHTML='';return}}
-  let r=await fetch('/api/cidades?q='+q);let c=await r.json();
-  document.getElementById('cidades-list').innerHTML='';
-  c.forEach(d=>{{
-    let div=document.createElement('div');div.className='cidade-item';
-    div.textContent=d.city+', '+d.state+' - '+d.country;
-    div.onclick=()=>{{
-      document.getElementById('cidade').value=d.city;
-      document.getElementById('estado').value=d.state;
-      document.getElementById('pais').value=d.country;
-      let latD=Math.abs(d.lat),latG=Math.floor(latD),latM=Math.floor((latD-latG)*60),latS=Math.round(((latD-latG)*60-latM)*60);
-      document.getElementById('latg').value=latG;
-      document.getElementById('latm').value=latM;
-      document.getElementById('lats').value=latS;
-      document.getElementById('lath').value=(d.lat<0?'S':'N');
-      let lonD=Math.abs(d.lon),lonG=Math.floor(lonD),lonM=Math.floor((lonD-lonG)*60),lonS=Math.round(((lonD-lonG)*60-lonM)*60);
-      document.getElementById('long').value=lonG;
-      document.getElementById('lonm').value=lonM;
-      document.getElementById('lons').value=lonS;
-      document.getElementById('lonh').value=(d.lon<0?'W':'E');
-      document.getElementById('tz').value=d.tz;
-      document.getElementById('modal').style.display='none';
-    }};
-    document.getElementById('cidades-list').appendChild(div);
-  }})
-}});
-document.getElementById('f').addEventListener('submit',async e=>{{
-  e.preventDefault();
-  let lat=dmsToDecimal(parseInt(document.getElementById('latg').value),parseInt(document.getElementById('latm').value),parseInt(document.getElementById('lats').value),document.getElementById('lath').value);
-  let lon=dmsToDecimal(parseInt(document.getElementById('long').value),parseInt(document.getElementById('lonm').value),parseInt(document.getElementById('lons').value),document.getElementById('lonh').value);
-  let dados={{nome:document.getElementById('nome').value,dia:parseInt(document.getElementById('dia').value),mes:parseInt(document.getElementById('mes').value),ano:parseInt(document.getElementById('ano').value),hora:parseInt(document.getElementById('hora').value),minuto:parseInt(document.getElementById('minuto').value),segundo:parseInt(document.getElementById('segundo').value),latitude:lat,longitude:lon,timezone:parseFloat(document.getElementById('tz').value),cidade:document.getElementById('cidade').value,estado:document.getElementById('estado').value,pais:document.getElementById('pais').value}};
-  document.getElementById('load').style.display='block';document.getElementById('res').style.display='none';
-  let res=await fetch('/api/calcular',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(dados)}});
-  let j=await res.json();document.getElementById('load').style.display='none';
-  if(j.status=='ok'){{document.getElementById('txt').textContent=j.relatorio;document.getElementById('res').style.display='block'}}
-  else alert('Erro: '+j.msg);
-}});
-</script>
-</body></html>'''
+</body>
+</html>'''
+    return html
 
 
 @app.route('/api/cidades')
@@ -819,7 +778,8 @@ def calcular():
         m = MapaAstral(d.get('nome', 'Mapa'), int(d['dia']), int(d['mes']), int(d['ano']),
                        int(d['hora']), int(d['minuto']), int(d['segundo']),
                        float(d['latitude']), float(d['longitude']), float(d['timezone']),
-                       d.get('cidade', ''), d.get('estado', ''), d.get('pais', ''))
+                       d.get('cidade', ''), d.get('estado', ''), d.get('pais', ''),
+                       d.get('houseSys', 'Regiomontanus'))
         return jsonify({'status': 'ok', 'relatorio': m.gerar_relatorio()})
     except Exception as e:
         return jsonify({'status': 'erro', 'msg': str(e)}), 400
