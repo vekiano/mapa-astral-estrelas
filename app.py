@@ -18,7 +18,14 @@ try:
 except:
     pass
 
-app = Flask(__name__, static_folder='public', static_url_path='')
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+PUBLIC_DIR = os.path.join(BASE_DIR, 'public')
+
+app = Flask(__name__, static_folder=PUBLIC_DIR, static_url_path='')
+
+@app.route('/')
+def index():
+    return send_from_directory(PUBLIC_DIR, 'index.html')
 
 # ========== CONSTANTES ==========
 
