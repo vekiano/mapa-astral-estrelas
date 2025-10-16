@@ -1,17 +1,16 @@
 # -*- coding: utf-8 -*-
 """
 Mapa Astral Online - Vercel
-Sem interface gráfica, apenas API Flask
+Sem interface gráfica, apenas API Flask com HTML inline
 """
 
 import os
 import math
-import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Dict, List, Tuple, Optional
 
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify
 
 try:
     import swisseph as swe
@@ -19,13 +18,8 @@ except:
     pass
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-PUBLIC_DIR = os.path.join(BASE_DIR, 'public')
 
-app = Flask(__name__, static_folder=PUBLIC_DIR, static_url_path='')
-
-@app.route('/')
-def index():
-    return send_from_directory(PUBLIC_DIR, 'index.html')
+app = Flask(__name__)
 
 # ========== CONSTANTES ==========
 
@@ -90,14 +84,6 @@ def dt_to_jd_utc(dt_utc: datetime) -> float:
     frac = (dt_utc.hour + dt_utc.minute / 60.0 + dt_utc.second / 3600.0)
     jd_utc = swe.julday(dt_utc.year, dt_utc.month, dt_utc.day, frac, 1)
     return jd_utc
-
-
-def jd_para_datetime(jd: float, tz_offset: float = 0.0) -> datetime:
-    year, month, day, hour = swe.revjul(jd + tz_offset / 24.0)
-    hour_int = int(hour)
-    minute = int((hour - hour_int) * 60)
-    second = int(((hour - hour_int) * 60 - minute) * 60)
-    return datetime(year, month, day, hour_int, minute, second)
 
 
 def calcular_posicao_planeta(jd: float, planeta: int) -> float:
@@ -237,7 +223,166 @@ class MapaAstral:
 
 @app.route('/')
 def index():
-    return send_from_directory('public', 'index.html')
+    html = """
+    <!DOCTYPE html>
+    <html lang="pt-BR">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Mapa Astral Online</title>
+        <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                min-height: 100vh;
+                padding: 20px;
+            }
+            .container {
+                max-width: 600px;
+                margin: 0 auto;
+                background: white;
+                border-radius: 12px;
+                padding: 40px;
+                box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            }
+            h1 {
+                text-align: center;
+                color: #333;
+                margin-bottom: 30px;
+            }
+            fieldset {
+                border: 1px solid #ddd;
+                border-radius: 8px;
+                padding: 15px;
+                margin-bottom: 20px;
+            }
+            legend {
+                padding: 0 10px;
+                color: #667eea;
+                font-weight: 600;
+            }
+            input {
+                width: 100%;
+                padding: 10px;
+                margin: 8px 0;
+                border: 1px solid #ddd;
+                border-radius: 6px;
+            }
+            button {
+                width: 100%;
+                padding: 12px;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                border: none;
+                border-radius: 6px;
+                font-weight: 600;
+                cursor: pointer;
+            }
+            button:hover {
+                transform: translateY(-2px);
+            }
+            .resultado {
+                margin-top: 30px;
+                padding: 20px;
+                background: #f0f9ff;
+                border-radius: 8px;
+                display: none;
+            }
+            .resultado pre {
+                font-family: monospace;
+                font-size: 12px;
+                max-height: 400px;
+                overflow: auto;
+                color: #1e3a8a;
+                white-space: pre-wrap;
+                word-wrap: break-word;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>🌙 Mapa Astral Online</h1>
+
+            <form id="mapForm">
+                <fieldset>
+                    <legend>Identificação</legend>
+                    <input type="text" id="nome" placeholder="Nome completo" required>
+                    <input type="text" id="cidade" placeholder="Cidade" required>
+                </fieldset>
+
+                <fieldset>
+                    <legend>Data e Hora de Nascimento</legend>
+                    <input type="number" id="dia" min="1" max="31" placeholder="Dia" required>
+                    <input type="number" id="mes" min="1" max="12" placeholder="Mês" required>
+                    <input type="number" id="ano" min="1900" max="2100" placeholder="Ano" required>
+                    <input type="number" id="hora" min="0" max="23" placeholder="Hora" required>
+                    <input type="number" id="minuto" min="0" max="59" placeholder="Minuto" required>
+                    <input type="number" id="segundo" min="0" max="59" placeholder="Segundo" required>
+                </fieldset>
+
+                <fieldset>
+                    <legend>Localização</legend>
+                    <input type="number" id="latitude" step="0.01" placeholder="Latitude" required>
+                    <input type="number" id="longitude" step="0.01" placeholder="Longitude" required>
+                    <input type="number" id="timezone" step="0.5" placeholder="UTC (ex: -3)" required>
+                </fieldset>
+
+                <button type="submit">CALCULAR MAPA ASTRAL</button>
+            </form>
+
+            <div id="resultado" class="resultado">
+                <button onclick="fecharResultado()" style="margin-bottom: 10px;">Fechar</button>
+                <pre id="textoResultado"></pre>
+            </div>
+        </div>
+
+        <script>
+            document.getElementById('mapForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+
+                const dados = {
+                    nome: document.getElementById('nome').value,
+                    dia: parseInt(document.getElementById('dia').value),
+                    mes: parseInt(document.getElementById('mes').value),
+                    ano: parseInt(document.getElementById('ano').value),
+                    hora: parseInt(document.getElementById('hora').value),
+                    minuto: parseInt(document.getElementById('minuto').value),
+                    segundo: parseInt(document.getElementById('segundo').value),
+                    latitude: parseFloat(document.getElementById('latitude').value),
+                    longitude: parseFloat(document.getElementById('longitude').value),
+                    timezone: parseFloat(document.getElementById('timezone').value),
+                    cidade: document.getElementById('cidade').value,
+                };
+
+                try {
+                    const res = await fetch('/api/calcular', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify(dados)
+                    });
+
+                    const json = await res.json();
+
+                    if (json.status === 'ok') {
+                        document.getElementById('textoResultado').textContent = json.relatorio;
+                        document.getElementById('resultado').style.display = 'block';
+                    } else {
+                        alert('Erro: ' + json.msg);
+                    }
+                } catch (e) {
+                    alert('Erro de conexão: ' + e.message);
+                }
+            });
+
+            function fecharResultado() {
+                document.getElementById('resultado').style.display = 'none';
+            }
+        </script>
+    </body>
+    </html>
+    """
+    return html
 
 
 @app.route('/api/calcular', methods=['POST'])
