@@ -636,7 +636,16 @@ button:hover{{transform:translateY(-2px)}}
 <select style="width:100%;display:none"><option>W</option><option>E</option></select>
 </div>
 <label>Casas Terrestres</label>
-<select style="width:100%"><option>Regiomontanus</option></select>
+<select style="width:100%">
+<option>Regiomontanus</option>
+<option>Placidus</option>
+<option>Campanus</option>
+<option>Koch</option>
+<option>Alcabitius</option>
+<option>Porphyry</option>
+<option>Whole Sign</option>
+<option>Equal</option>
+</select>
 </fieldset>
 <button type="submit">CALCULAR</button>
 </form>
@@ -654,6 +663,70 @@ button:hover{{transform:translateY(-2px)}}
 <script>
 function dmsToDecimal(g,m,s,h){{let d=Math.abs(g)+Math.abs(m)/60+Math.abs(s)/3600;return(h=='S'||h=='W')?-d:d}}
 function copiarResultado(){{let txt=document.getElementById('txt').textContent;navigator.clipboard.writeText(txt).then(()=>{{alert('Texto copiado para a memória!')}}).catch(()=>{{alert('Erro ao copiar!')}})}}
+
+function atualizarHoraLocal() {{
+  let tz = parseFloat(document.getElementById('tz').value);
+  let dia = parseInt(document.getElementById('dia').value);
+  let mes = parseInt(document.getElementById('mes').value);
+  let ano = parseInt(document.getElementById('ano').value);
+  let hora = parseInt(document.getElementById('hora').value);
+  let minuto = parseInt(document.getElementById('minuto').value);
+  let segundo = parseInt(document.getElementById('segundo').value);
+
+  let utcDate = new Date(Date.UTC(ano, mes-1, dia, hora, minuto, segundo));
+  let localDate = new Date(utcDate.getTime() + (tz * 60 * 60 * 1000));
+
+  document.getElementById('hora').value = localDate.getUTCHours();
+  document.getElementById('minuto').value = localDate.getUTCMinutes();
+  document.getElementById('segundo').value = localDate.getUTCSeconds();
+}}
+
+window.addEventListener('load', function() {{
+  atualizarHoraLocal();
+  document.getElementById('tz').addEventListener('change', atualizarHoraLocal);
+}});
+
+function abrirBusca(){{document.getElementById('modal').style.display='flex';document.getElementById('search').focus()}}
+document.getElementById('search').addEventListener('input',async e=>{{
+  let q=e.target.value;if(q.length<2){{document.getElementById('cidades-list').innerHTML='';return}}
+  let r=await fetch('/api/cidades?q='+q);let c=await r.json();
+  document.getElementById('cidades-list').innerHTML='';
+  c.forEach(d=>{{
+    let div=document.createElement('div');div.className='cidade-item';
+    div.textContent=d.city+', '+d.state+' - '+d.country;
+    div.onclick=()=>{{
+      document.getElementById('cidade').value=d.city;
+      document.getElementById('estado').value=d.state;
+      document.getElementById('pais').value=d.country;
+      let latD=Math.abs(d.lat),latG=Math.floor(latD),latM=Math.floor((latD-latG)*60),latS=Math.round(((latD-latG)*60-latM)*60);
+      document.getElementById('latg').value=latG;
+      document.getElementById('latm').value=latM;
+      document.getElementById('lats').value=latS;
+      document.getElementById('lath').value=(d.lat<0?'S':'N');
+      let lonD=Math.abs(d.lon),lonG=Math.floor(lonD),lonM=Math.floor((lonD-lonG)*60),lonS=Math.round(((lonD-lonG)*60-lonM)*60);
+      document.getElementById('long').value=lonG;
+      document.getElementById('lonm').value=lonM;
+      document.getElementById('lons').value=lonS;
+      document.getElementById('lonh').value=(d.lon<0?'W':'E');
+      document.getElementById('tz').value=d.tz;
+      atualizarHoraLocal();
+      document.getElementById('modal').style.display='none';
+    }};
+    document.getElementById('cidades-list').appendChild(div);
+  }})
+}});
+document.getElementById('f').addEventListener('submit',async e=>{{
+  e.preventDefault();
+  let lat=dmsToDecimal(parseInt(document.getElementById('latg').value),parseInt(document.getElementById('latm').value),parseInt(document.getElementById('lats').value),document.getElementById('lath').value);
+  let lon=dmsToDecimal(parseInt(document.getElementById('long').value),parseInt(document.getElementById('lonm').value),parseInt(document.getElementById('lons').value),document.getElementById('lonh').value);
+  let dados={{nome:document.getElementById('nome').value,dia:parseInt(document.getElementById('dia').value),mes:parseInt(document.getElementById('mes').value),ano:parseInt(document.getElementById('ano').value),hora:parseInt(document.getElementById('hora').value),minuto:parseInt(document.getElementById('minuto').value),segundo:parseInt(document.getElementById('segundo').value),latitude:lat,longitude:lon,timezone:parseFloat(document.getElementById('tz').value),cidade:document.getElementById('cidade').value,estado:document.getElementById('estado').value,pais:document.getElementById('pais').value}};
+  document.getElementById('load').style.display='block';document.getElementById('res').style.display='none';
+  let res=await fetch('/api/calcular',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(dados)}});
+  let j=await res.json();document.getElementById('load').style.display='none';
+  if(j.status=='ok'){{document.getElementById('txt').textContent=j.relatorio;document.getElementById('res').style.display='block'}}
+  else alert('Erro: '+j.msg);
+}});
+</script>
 function abrirBusca(){{document.getElementById('modal').style.display='flex';document.getElementById('search').focus()}}
 document.getElementById('search').addEventListener('input',async e=>{{
   let q=e.target.value;if(q.length<2){{document.getElementById('cidades-list').innerHTML='';return}}
