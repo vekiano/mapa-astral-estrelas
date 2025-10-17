@@ -529,6 +529,7 @@ class MapaAstral:
 @app.route('/')
 def index():
     now = datetime.now()
+    hora_ajustada = (now.hour - 3) % 24
     html = '''<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -570,7 +571,7 @@ button:hover{transform:translateY(-2px)}
 <input type="text" id="nome" value="Mapa do Momento" required style="width:100%">
 <label>Dia / Mes / Ano</label>
 <div class="row">
-<input type="number" id="dia" min="1" max="31" value="''' + str(now.day) + '''" required>
+<input type="number" id="dia" min="1" max="31" value="''' + str(hora_ajustada) + '''" required>
 <input type="number" id="mes" min="1" max="12" value="''' + str(now.month) + '''" required>
 <input type="number" id="ano" value="''' + str(now.year) + '''" required>
 </div>
