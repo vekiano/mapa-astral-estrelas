@@ -180,7 +180,7 @@ def buscar_transito_exato(jd_inicio: float, jd_fim: float, planeta1: int, planet
         else:
             jd1 = jd_meio
 
-    return melhor_jd, melhor_orbe if melhor_orbe <= orbe else (0, 999)
+    return (melhor_jd, melhor_orbe) if melhor_orbe <= orbe else (0, 999)
 
 
 def calcular_asc_mc_fortuna(jd, latitude, longitude):
