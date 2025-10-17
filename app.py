@@ -374,7 +374,7 @@ class MapaAstral:
         self.transitos = transitos_filtrados
 
     def calcular_transitos(self, dias_margem: int = 2):
-        """Calcula trânsitos com metodologia completa de mapa_ah"""
+        """Calcula trânsitos planetários sobre ASC/MC/FOR fixos do mapa natal"""
         self.transitos.clear()
 
         dt_inicio = self.dt_utc - timedelta(days=dias_margem)
@@ -382,43 +382,12 @@ class MapaAstral:
         jd_inicio = dt_to_jd_utc(dt_inicio)
         jd_fim = dt_to_jd_utc(dt_fim)
 
-        # ASPETOS DE LONGITUDE (entre planetas)
+        # Calcular ASC, MC, FOR UMA ÚNICA VEZ (do mapa natal)
+        asc_natal, mc_natal, for_natal = calcular_asc_mc_fortuna(self.jd, self.latitude, self.longitude)
+
         planetas_list = list(PLANETAS.keys())
-        for i, p1_nome in enumerate(planetas_list):
-            for p2_nome in planetas_list[i + 1:]:
-                p1, p2 = PLANETAS[p1_nome], PLANETAS[p2_nome]
 
-                for aspecto_deg, orbe in ORBES_PADRAO.items():
-                    intervalo = determinar_intervalo(p1, p2)
-                    jd_atual = jd_inicio
-
-                    while jd_atual < jd_fim:
-                        jd_prox = min(jd_atual + intervalo, jd_fim)
-
-                        pos1 = calcular_posicao_planeta(jd_atual, p1)
-                        pos2 = calcular_posicao_planeta(jd_atual, p2)
-                        diff_atual = angular_difference(pos1, pos2)
-
-                        pos1_prox = calcular_posicao_planeta(jd_prox, p1)
-                        pos2_prox = calcular_posicao_planeta(jd_prox, p2)
-                        diff_prox = angular_difference(pos1_prox, pos2_prox)
-
-                        gap_atual = abs(diff_atual - aspecto_deg)
-                        gap_prox = abs(diff_prox - aspecto_deg)
-
-                        if min(gap_atual, gap_prox) <= orbe:
-                            jd_exato, orbe_final = buscar_transito_exato(jd_atual, jd_prox, p1, p2, aspecto_deg, orbe)
-
-                            if jd_exato > 0 and jd_inicio <= jd_exato <= jd_fim and orbe_final < 0.05:
-                                pos1_ex = calcular_posicao_planeta(jd_exato, p1)
-                                pos2_ex = calcular_posicao_planeta(jd_exato, p2)
-                                trans = Transito(jd_exato, p1_nome, p2_nome, aspecto_deg, pos1_ex, pos2_ex, orbe_final,
-                                                 'aspecto')
-                                self.transitos.append(trans)
-
-                        jd_atual = jd_prox
-
-        # ASPETOS DE LONGITUDE (planetas com ASC/MC/FOR)
+        # TRÂNSITOS DE PLANETAS SOBRE ASC/MC/FOR (fixos do mapa natal)
         for p1_nome in planetas_list:
             p1 = PLANETAS[p1_nome]
 
@@ -429,16 +398,13 @@ class MapaAstral:
                 while jd_atual < jd_fim:
                     jd_prox = min(jd_atual + intervalo, jd_fim)
 
-                    pos1 = calcular_posicao_planeta(jd_atual, p1)
-                    asc, mc, for_lon = calcular_asc_mc_fortuna(jd_atual, self.latitude, self.longitude)
+                    pos1_atual = calcular_posicao_planeta(jd_atual, p1)
+                    pos1_prox = calcular_posicao_planeta(jd_prox, p1)
 
-                    for ponto_nome, ponto_lon in [('ASC', asc), ('MC', mc), ('FOR', for_lon)]:
-                        diff_atual = angular_difference(pos1, ponto_lon)
-
-                        pos1_prox = calcular_posicao_planeta(jd_prox, p1)
-                        asc_prox, mc_prox, for_prox = calcular_asc_mc_fortuna(jd_prox, self.latitude, self.longitude)
-                        ponto_prox = {'ASC': asc_prox, 'MC': mc_prox, 'FOR': for_prox}[ponto_nome]
-                        diff_prox = angular_difference(pos1_prox, ponto_prox)
+                    # Verificar aspectos com ASC, MC, FOR (fixos)
+                    for ponto_nome, ponto_lon in [('ASC', asc_natal), ('MC', mc_natal), ('FOR', for_natal)]:
+                        diff_atual = angular_difference(pos1_atual, ponto_lon)
+                        diff_prox = angular_difference(pos1_prox, ponto_lon)
 
                         gap_atual = abs(diff_atual - aspecto_deg)
                         gap_prox = abs(diff_prox - aspecto_deg)
@@ -448,45 +414,9 @@ class MapaAstral:
 
                             if jd_exato > 0 and jd_inicio <= jd_exato <= jd_fim and orbe_final < 0.05:
                                 pos1_ex = calcular_posicao_planeta(jd_exato, p1)
-                                asc_ex, mc_ex, for_ex = calcular_asc_mc_fortuna(jd_exato, self.latitude, self.longitude)
-                                ponto_ex = {'ASC': asc_ex, 'MC': mc_ex, 'FOR': for_ex}[ponto_nome]
-                                trans = Transito(jd_exato, p1_nome, ponto_nome, aspecto_deg, pos1_ex, ponto_ex,
+                                trans = Transito(jd_exato, p1_nome, ponto_nome, aspecto_deg, pos1_ex, ponto_lon,
                                                  orbe_final, 'aspecto')
                                 self.transitos.append(trans)
-
-                    jd_atual = jd_prox
-
-        # PARALELOS E CONTRA-PARALELOS (declinação)
-        for i, p1_nome in enumerate(planetas_list):
-            for p2_nome in planetas_list[i + 1:]:
-                p1, p2 = PLANETAS[p1_nome], PLANETAS[p2_nome]
-                intervalo = determinar_intervalo(p1, p2)
-                jd_atual = jd_inicio
-
-                while jd_atual < jd_fim:
-                    jd_prox = min(jd_atual + intervalo, jd_fim)
-
-                    dec1 = calcular_declinacao_planeta(jd_atual, p1)
-                    dec2 = calcular_declinacao_planeta(jd_atual, p2)
-
-                    gap_par = abs(dec1 - dec2)
-                    gap_cpa = abs(dec1 + dec2)
-
-                    if gap_par <= 1.2:
-                        jd_exato, orbe_f = buscar_transito_exato(jd_atual, jd_prox, p1, p2, -1.0, 1.2)
-                        if jd_exato > 0 and jd_inicio <= jd_exato <= jd_fim:
-                            dec1_ex = calcular_declinacao_planeta(jd_exato, p1)
-                            dec2_ex = calcular_declinacao_planeta(jd_exato, p2)
-                            trans = Transito(jd_exato, p1_nome, p2_nome, -1.0, dec1_ex, dec2_ex, abs(dec1_ex - dec2_ex), 'PAR')
-                            self.transitos.append(trans)
-
-                    if gap_cpa <= 1.2:
-                        jd_exato, orbe_f = buscar_transito_exato(jd_atual, jd_prox, p1, p2, -2.0, 1.2)
-                        if jd_exato > 0 and jd_inicio <= jd_exato <= jd_fim:
-                            dec1_ex = calcular_declinacao_planeta(jd_exato, p1)
-                            dec2_ex = calcular_declinacao_planeta(jd_exato, p2)
-                            trans = Transito(jd_exato, p1_nome, p2_nome, -2.0, dec1_ex, dec2_ex, abs(dec1_ex + dec2_ex), 'CPA')
-                            self.transitos.append(trans)
 
                     jd_atual = jd_prox
 
