@@ -115,18 +115,31 @@ def calcular_declinacao_planeta(jd: float, planeta: int) -> float:
 
 def determinar_intervalo(planeta1: int, planeta2: int) -> float:
     planeta_lento = max(planeta1, planeta2)
+    # intervalos = {
+    #     swe.MOON: 0.01, swe.MERCURY: 0.05, swe.VENUS: 0.05, swe.SUN: 0.05,
+    #     swe.MARS: 0.1, swe.JUPITER: 0.2, swe.SATURN: 0.5, swe.URANUS: 1.0,
+    #     swe.NEPTUNE: 1.0, swe.PLUTO: 1.0, swe.TRUE_NODE: 0.5,
+    # }
     intervalos = {
-        swe.MOON: 0.01, swe.MERCURY: 0.05, swe.VENUS: 0.05, swe.SUN: 0.05,
-        swe.MARS: 0.1, swe.JUPITER: 0.2, swe.SATURN: 0.5, swe.URANUS: 1.0,
-        swe.NEPTUNE: 1.0, swe.PLUTO: 1.0, swe.TRUE_NODE: 0.5,
+        swe.MOON: 0.005,
+        swe.MERCURY: 0.02,
+        swe.VENUS: 0.02,
+        swe.SUN: 0.05,
+        swe.MARS: 0.05,  # aumentar precisão
+        swe.JUPITER: 0.1,
+        swe.SATURN: 0.2,
+        swe.URANUS: 0.5,
+        swe.NEPTUNE: 0.5,
+        swe.PLUTO: 0.5,
+        swe.TRUE_NODE: 0.2,
     }
     return intervalos.get(planeta_lento, 0.5)
 
 
 def buscar_transito_exato(jd_inicio: float, jd_fim: float, planeta1: int, planeta2: int,
                           angulo_aspecto: float, orbe: float) -> Tuple[float, float]:
-    NUM_SAMPLES = 12
-    BISSECCOES_MAX = 6
+    NUM_SAMPLES = 24
+    BISSECCOES_MAX = 10
     DELTA_MIN = 1.0e-10
     ORBE_LIMITE = orbe * 1.5
 
@@ -344,7 +357,7 @@ class MapaAstral:
                         if min(gap_atual, gap_prox) <= orbe:
                             jd_exato, orbe_final = buscar_transito_exato(jd_atual, jd_prox, p1, p2, aspecto_deg, orbe)
 
-                            if jd_exato > 0 and jd_inicio <= jd_exato <= jd_fim and orbe_final < orbe:
+                            if jd_exato > 0 and jd_inicio <= jd_exato <= jd_fim and orbe_final < 0.005:
                                 pos1_ex = calcular_posicao_planeta(jd_exato, p1)
                                 pos2_ex = calcular_posicao_planeta(jd_exato, p2)
 
