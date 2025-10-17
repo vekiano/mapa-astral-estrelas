@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 import os
-import math
 from datetime import datetime, timedelta
 from typing import Tuple
 from dataclasses import dataclass
@@ -42,8 +41,8 @@ class Corpo:
 @dataclass
 class Transito:
     jd_exato: float
-    planeta1_nome: str
-    planeta2_nome: str
+    planeta1: int
+    planeta2: int
     aspecto: float
     pos_planeta1: float
     pos_planeta2: float
@@ -109,135 +108,25 @@ def calcular_posicao_planeta(jd, planeta):
     return float(pos[0]) % 360.0
 
 
-def calcular_declinacao_planeta(jd, planeta):
+def calcular_declinacao_planeta(jd: float, planeta: int) -> float:
     eq, _ = swe.calc_ut(jd, planeta, swe.FLG_SWIEPH | swe.FLG_EQUATORIAL)
     return float(eq[1])
 
 
-def calcular_asc_mc_fortuna(jd, latitude, longitude):
-    casas, ascmc = swe.houses(jd, latitude, longitude, b'R')
-    asc_lon = float(ascmc[0]) % 360.0
-    mc_lon = float(ascmc[1]) % 360.0
-    sol_pos, _ = swe.calc_ut(jd, swe.SUN)
-    lua_pos, _ = swe.calc_ut(jd, swe.MOON)
-    sol_lon = float(sol_pos[0]) % 360.0
-    lua_lon = float(lua_pos[0]) % 360.0
-    fortuna_lon = (asc_lon + lua_lon - sol_lon) % 360.0
-    return asc_lon, mc_lon, fortuna_lon
-
-
 def determinar_intervalo(planeta1: int, planeta2: int) -> float:
-    """Intervalo de busca adaptativo baseado na velocidade dos planetas"""
     planeta_lento = max(planeta1, planeta2)
     intervalos = {
-        swe.MOON: 0.01,
-        swe.MERCURY: 0.05,
-        swe.VENUS: 0.05,
-        swe.SUN: 0.05,
-        swe.MARS: 0.1,
-        swe.JUPITER: 0.2,
-        swe.SATURN: 0.5,
-        swe.URANUS: 1.0,
-        swe.NEPTUNE: 1.0,
-        swe.PLUTO: 1.0,
-        swe.TRUE_NODE: 0.5,
+        swe.MOON: 0.01, swe.MERCURY: 0.05, swe.VENUS: 0.05, swe.SUN: 0.05,
+        swe.MARS: 0.1, swe.JUPITER: 0.2, swe.SATURN: 0.5, swe.URANUS: 1.0,
+        swe.NEPTUNE: 1.0, swe.PLUTO: 1.0, swe.TRUE_NODE: 0.5,
     }
     return intervalos.get(planeta_lento, 0.5)
 
 
-def buscar_transito_exato_ponto_fixo(jd_inicio: float, jd_fim: float, planeta: int,
-                                     ponto_lon_fixo: float, angulo_aspecto: float, orbe: float) -> Tuple[float, float]:
-    """Busca trânsito de um planeta sobre um ângulo fixo (ASC/MC/FOR)"""
-    NUM_SAMPLES = 24
-    BISSECCOES_MAX = 8
-    SECANTE_JUMP_MAX = 1.0
-    DELTA_MIN = 1.0e-10
-    ORBE_LIMITE = orbe
-
-    def calcular_orbe_atual(jd: float) -> float:
-        p1 = calcular_posicao_planeta(jd, planeta)
-        diff = angular_difference(p1, ponto_lon_fixo)
-        return diff - angulo_aspecto
-
-    # Amostragem inicial
-    delta_tempo = (jd_fim - jd_inicio) / (NUM_SAMPLES - 1)
-    amostras = []
-    melhor_orbe = 999
-    melhor_jd = 0
-
-    for i in range(NUM_SAMPLES):
-        jd_sample = jd_inicio + i * delta_tempo
-        orbe_val = abs(calcular_orbe_atual(jd_sample))
-        amostras.append((jd_sample, orbe_val))
-        if orbe_val < melhor_orbe:
-            melhor_orbe = orbe_val
-            melhor_jd = jd_sample
-
-    if melhor_orbe > ORBE_LIMITE:
-        return 0, 999
-
-    # Encontrar intervalo com mínimo
-    jd1, jd2 = 0, 0
-    for i in range(1, NUM_SAMPLES - 1):
-        if amostras[i - 1][1] > amostras[i][1] < amostras[i + 1][1]:
-            jd1, jd2 = amostras[i - 1][0], amostras[i + 1][0]
-            break
-
-    if jd1 == 0:
-        idx = [i for i, (jd, _) in enumerate(amostras) if jd == melhor_jd][0]
-        idx1 = max(0, idx - 1)
-        idx2 = min(NUM_SAMPLES - 1, idx + 1)
-        jd1, jd2 = amostras[idx1][0], amostras[idx2][0]
-
-    # Bissecção
-    for _ in range(BISSECCOES_MAX):
-        jd_meio = (jd1 + jd2) / 2
-        orbe_meio = abs(calcular_orbe_atual(jd_meio))
-        if orbe_meio < melhor_orbe:
-            melhor_orbe = orbe_meio
-            melhor_jd = jd_meio
-        if orbe_meio <= 0.001:
-            return jd_meio, orbe_meio
-
-        orbe1 = abs(calcular_orbe_atual(jd1))
-        orbe2 = abs(calcular_orbe_atual(jd2))
-        if orbe1 < orbe2:
-            jd2 = jd_meio
-        else:
-            jd1 = jd_meio
-
-    # Método das secantes para refinamento
-    jd = melhor_jd
-    dx = (jd2 - jd1) / 4
-
-    for _ in range(20):
-        jd_ant = jd
-        jd_prox = jd + dx
-        orbe_ant = calcular_orbe_atual(jd_ant)
-        orbe_prox = calcular_orbe_atual(jd_prox)
-
-        if abs(orbe_prox - orbe_ant) < DELTA_MIN:
-            break
-
-        dx = -orbe_ant * (jd_prox - jd_ant) / (orbe_prox - orbe_ant)
-        if abs(dx) > SECANTE_JUMP_MAX:
-            dx = SECANTE_JUMP_MAX if dx > 0 else -SECANTE_JUMP_MAX
-
-        jd = jd_ant + dx
-        orbe = abs(calcular_orbe_atual(jd))
-
-        if orbe < melhor_orbe:
-            melhor_orbe = orbe
-            melhor_jd = jd
-
-        if orbe <= 0.001 or abs(dx) < 0.0001:
-            return jd, orbe
-
-    return (melhor_jd, melhor_orbe) if melhor_orbe <= orbe else (0, 999)
-    """Busca o momento exato de um trânsito com método das secantes"""
+def buscar_transito_exato(jd_inicio: float, jd_fim: float, planeta1: int, planeta2: int,
+                          angulo_aspecto: float, orbe: float) -> Tuple[float, float]:
     NUM_SAMPLES = 12
     BISSECCOES_MAX = 6
-    SECANTE_JUMP_MAX = 1.0
     DELTA_MIN = 1.0e-10
     ORBE_LIMITE = orbe * 1.5
 
@@ -247,7 +136,6 @@ def buscar_transito_exato_ponto_fixo(jd_inicio: float, jd_fim: float, planeta: i
         diff = angular_difference(p1, p2)
         return diff - angulo_aspecto
 
-    # Amostragem inicial
     delta_tempo = (jd_fim - jd_inicio) / (NUM_SAMPLES - 1)
     amostras = []
     melhor_orbe = 999
@@ -264,7 +152,6 @@ def buscar_transito_exato_ponto_fixo(jd_inicio: float, jd_fim: float, planeta: i
     if melhor_orbe > ORBE_LIMITE:
         return 0, 999
 
-    # Encontrar intervalo com mínimo
     jd1, jd2 = 0, 0
     for i in range(1, NUM_SAMPLES - 1):
         if amostras[i - 1][1] > amostras[i][1] < amostras[i + 1][1]:
@@ -277,7 +164,6 @@ def buscar_transito_exato_ponto_fixo(jd_inicio: float, jd_fim: float, planeta: i
         idx2 = min(NUM_SAMPLES - 1, idx + 1)
         jd1, jd2 = amostras[idx1][0], amostras[idx2][0]
 
-    # Bissecção para aproximação
     for _ in range(BISSECCOES_MAX):
         jd_meio = (jd1 + jd2) / 2
         orbe_meio = abs(calcular_orbe_atual(jd_meio))
@@ -294,34 +180,7 @@ def buscar_transito_exato_ponto_fixo(jd_inicio: float, jd_fim: float, planeta: i
         else:
             jd1 = jd_meio
 
-    # Método das secantes para refinamento final
-    jd = melhor_jd
-    dx = (jd2 - jd1) / 4
-
-    for _ in range(20):
-        jd_ant = jd
-        jd_prox = jd + dx
-        orbe_ant = calcular_orbe_atual(jd_ant)
-        orbe_prox = calcular_orbe_atual(jd_prox)
-
-        if abs(orbe_prox - orbe_ant) < DELTA_MIN:
-            break
-
-        dx = -orbe_ant * (jd_prox - jd_ant) / (orbe_prox - orbe_ant)
-        if abs(dx) > SECANTE_JUMP_MAX:
-            dx = SECANTE_JUMP_MAX if dx > 0 else -SECANTE_JUMP_MAX
-
-        jd = jd_ant + dx
-        orbe = abs(calcular_orbe_atual(jd))
-
-        if orbe < melhor_orbe:
-            melhor_orbe = orbe
-            melhor_jd = jd
-
-        if orbe <= 0.001 or abs(dx) < 0.0001:
-            return jd, orbe
-
-    return (melhor_jd, melhor_orbe) if melhor_orbe <= orbe else (0, 999)
+    return melhor_jd, melhor_orbe if melhor_orbe <= orbe else (0, 999)
 
 
 def buscar_mudanca_signo_exata(jd1: float, jd2: float, planeta: int, signo_saida: int) -> float:
@@ -349,8 +208,7 @@ def buscar_mudanca_signo_exata(jd1: float, jd2: float, planeta: int, signo_saida
 
 class MapaAstral:
     def __init__(self, nome_mapa, dia, mes, ano, hora, minuto, segundo,
-                 latitude_dec, longitude_dec, timezone_horas, cidade='', estado='', pais='',
-                 house_system_label='Regiomontanus'):
+                 latitude_dec, longitude_dec, timezone_horas, cidade='', estado='', pais='', house_system_label='Regiomontanus'):
         self.nome_mapa = nome_mapa.strip()
         self.dia, self.mes, self.ano = dia, mes, ano
         self.hora, self.minuto, self.segundo = hora, minuto, segundo
@@ -382,15 +240,6 @@ class MapaAstral:
             signo, pos_str = graus_para_signo_posicao(lon)
             self.planetas[nome] = Corpo(nome, lon, lat, lon_speed, mov, signo, pos_str)
 
-        asc_lon, mc_lon, for_lon = calcular_asc_mc_fortuna(self.jd, self.latitude, self.longitude)
-        sig_asc, pos_asc = graus_para_signo_posicao(asc_lon)
-        sig_mc, pos_mc = graus_para_signo_posicao(mc_lon)
-        sig_for, pos_for = graus_para_signo_posicao(for_lon)
-
-        self.planetas['ASC'] = Corpo('ASC', asc_lon, 0.0, 0.0, 'dir', sig_asc, pos_asc)
-        self.planetas['MC'] = Corpo('MC', mc_lon, 0.0, 0.0, 'dir', sig_mc, pos_mc)
-        self.planetas['FOR'] = Corpo('FOR', for_lon, 0.0, 0.0, 'dir', sig_for, pos_for)
-
     def calcular_casas(self):
         self.casas.clear()
         casas, _ = swe.houses(self.jd, self.latitude, self.longitude, b'R')
@@ -401,11 +250,9 @@ class MapaAstral:
 
     def calcular_aspectos(self):
         self.aspectos_natais.clear()
-        nomes = list(PLANETAS.keys()) + ['ASC', 'MC', 'FOR']
+        nomes = list(PLANETAS.keys())
         for i, p1_nome in enumerate(nomes):
             for p2_nome in nomes[i + 1:]:
-                if p1_nome not in self.planetas or p2_nome not in self.planetas:
-                    continue
                 p1 = self.planetas[p1_nome]
                 p2 = self.planetas[p2_nome]
                 dif = angular_difference(p1.lon, p2.lon)
@@ -420,14 +267,17 @@ class MapaAstral:
                         })
 
     def _deduplicate_transitos(self, janela_tempo: float = 0.15) -> None:
-        """Remove duplicatas de trânsitos mantendo apenas o com menor orbe"""
         if not self.transitos:
             return
 
         grupos = {}
         for trans in self.transitos:
-            asp_key = round(trans.aspecto, 1)
-            chave = (trans.planeta1_nome, trans.planeta2_nome, asp_key)
+            if trans.tipo in ['PAR', 'CPA']:
+                asp_key = trans.tipo
+            else:
+                asp_key = round(trans.aspecto, 1)
+
+            chave = (trans.planeta1, trans.planeta2, asp_key)
             if chave not in grupos:
                 grupos[chave] = []
             grupos[chave].append(trans)
@@ -461,7 +311,6 @@ class MapaAstral:
         self.transitos = transitos_filtrados
 
     def calcular_transitos(self, dias_margem: int = 2):
-        """Calcula trânsitos com metodologia exata de mapa_ah.py"""
         self.transitos.clear()
 
         dt_inicio = self.dt_utc - timedelta(days=dias_margem)
@@ -470,11 +319,6 @@ class MapaAstral:
         jd_fim = dt_to_jd_utc(dt_fim)
 
         planetas_list = list(PLANETAS.keys())
-
-        # CALCULAR ASC, MC, FOR UMA ÚNICA VEZ (do mapa natal)
-        asc_natal, mc_natal, for_natal = calcular_asc_mc_fortuna(self.jd, self.latitude, self.longitude)
-
-        # ========== ASPECTOS DE LONGITUDE (planeta-planeta) ==========
         for i, p1_nome in enumerate(planetas_list):
             for p2_nome in planetas_list[i + 1:]:
                 p1, p2 = PLANETAS[p1_nome], PLANETAS[p2_nome]
@@ -498,101 +342,17 @@ class MapaAstral:
                         gap_prox = abs(diff_prox - aspecto_deg)
 
                         if min(gap_atual, gap_prox) <= orbe:
-                            jd_exato, orbe_final = buscar_transito_exato_ponto_fixo(jd_atual, jd_prox, p1,
-                                                                                    calcular_posicao_planeta(jd_atual,
-                                                                                                             p2),
-                                                                                    aspecto_deg, orbe)
+                            jd_exato, orbe_final = buscar_transito_exato(jd_atual, jd_prox, p1, p2, aspecto_deg, orbe)
 
-                            if jd_exato > 0 and jd_inicio <= jd_exato <= jd_fim:
+                            if jd_exato > 0 and jd_inicio <= jd_exato <= jd_fim and orbe_final < 0.05:
                                 pos1_ex = calcular_posicao_planeta(jd_exato, p1)
                                 pos2_ex = calcular_posicao_planeta(jd_exato, p2)
-                                if orbe_final <= orbe:
-                                    trans = Transito(jd_exato, p1_nome, p2_nome, aspecto_deg, pos1_ex, pos2_ex,
-                                                     orbe_final, 'aspecto')
-                                    self.transitos.append(trans)
+
+                                trans = Transito(jd_exato, p1, p2, aspecto_deg, pos1_ex, pos2_ex, orbe_final, 'aspecto')
+                                self.transitos.append(trans)
 
                         jd_atual = jd_prox
 
-        # ========== ASPECTOS DE LONGITUDE (planeta sobre ASC/MC/FOR fixos) ==========
-        for p1_nome in planetas_list:
-            p1 = PLANETAS[p1_nome]
-
-            for aspecto_deg, orbe in ORBES_PADRAO.items():
-                intervalo = determinar_intervalo(p1, p1)
-                jd_atual = jd_inicio
-
-                while jd_atual < jd_fim:
-                    jd_prox = min(jd_atual + intervalo, jd_fim)
-
-                    pos1 = calcular_posicao_planeta(jd_atual, p1)
-
-                    for ponto_nome, ponto_lon in [('ASC', asc_natal), ('MC', mc_natal), ('FOR', for_natal)]:
-                        diff_atual = angular_difference(pos1, ponto_lon)
-
-                        pos1_prox = calcular_posicao_planeta(jd_prox, p1)
-                        diff_prox = angular_difference(pos1_prox, ponto_lon)
-
-                        gap_atual = abs(diff_atual - aspecto_deg)
-                        gap_prox = abs(diff_prox - aspecto_deg)
-
-                        if min(gap_atual, gap_prox) <= orbe:
-                            jd_exato, orbe_final = buscar_transito_exato_ponto_fixo(jd_atual, jd_prox, p1,
-                                                                                    ponto_lon, aspecto_deg, orbe)
-
-                            if jd_exato > 0 and jd_inicio <= jd_exato <= jd_fim:
-                                pos1_ex = calcular_posicao_planeta(jd_exato, p1)
-                                if orbe_final <= orbe:
-                                    trans = Transito(jd_exato, p1_nome, ponto_nome, aspecto_deg, pos1_ex, ponto_lon,
-                                                     orbe_final, 'aspecto')
-                                    self.transitos.append(trans)
-
-                    jd_atual = jd_prox
-
-        # ========== PARALELOS E CONTRA-PARALELOS (declinação) ==========
-        for i, p1_nome in enumerate(planetas_list):
-            for p2_nome in planetas_list[i + 1:]:
-                p1, p2 = PLANETAS[p1_nome], PLANETAS[p2_nome]
-                intervalo = determinar_intervalo(p1, p2)
-                jd_atual = jd_inicio
-
-                while jd_atual < jd_fim:
-                    jd_prox = min(jd_atual + intervalo, jd_fim)
-
-                    dec1 = calcular_declinacao_planeta(jd_atual, p1)
-                    dec2 = calcular_declinacao_planeta(jd_atual, p2)
-
-                    gap_par = abs(dec1 - dec2)
-                    gap_cpa = abs(dec1 + dec2)
-
-                    # PARALELOS
-                    if gap_par <= 1.2:
-                        jd_exato, orbe_f = buscar_transito_exato_ponto_fixo(jd_atual, jd_prox, p1,
-                                                                            calcular_declinacao_planeta(jd_atual, p2),
-                                                                            -1.0, 1.2)
-                        if jd_exato > 0 and jd_inicio <= jd_exato <= jd_fim:
-                            dec1_ex = calcular_declinacao_planeta(jd_exato, p1)
-                            dec2_ex = calcular_declinacao_planeta(jd_exato, p2)
-                            orbe_par = abs(dec1_ex - dec2_ex)
-                            if orbe_par <= 1.2:
-                                trans = Transito(jd_exato, p1_nome, p2_nome, -1.0, dec1_ex, dec2_ex, orbe_par, 'PAR')
-                                self.transitos.append(trans)
-
-                    # CONTRA-PARALELOS
-                    if gap_cpa <= 1.2:
-                        jd_exato, orbe_f = buscar_transito_exato_ponto_fixo(jd_atual, jd_prox, p1,
-                                                                            -calcular_declinacao_planeta(jd_atual, p2),
-                                                                            -2.0, 1.2)
-                        if jd_exato > 0 and jd_inicio <= jd_exato <= jd_fim:
-                            dec1_ex = calcular_declinacao_planeta(jd_exato, p1)
-                            dec2_ex = calcular_declinacao_planeta(jd_exato, p2)
-                            orbe_cpa = abs(dec1_ex + dec2_ex)
-                            if orbe_cpa <= 1.2:
-                                trans = Transito(jd_exato, p1_nome, p2_nome, -2.0, dec1_ex, dec2_ex, orbe_cpa, 'CPA')
-                                self.transitos.append(trans)
-
-                    jd_atual = jd_prox
-
-        # DEDUPLICAÇÃO
         self._deduplicate_transitos(janela_tempo=0.15)
 
     def calcular_mudancas_signo(self, dias_margem: int = 2):
@@ -633,7 +393,7 @@ class MapaAstral:
             jd_mudanca = mudanca_evento.jd_exato
 
             aspectos_lua = [t for t in self.transitos
-                            if (t.planeta1_nome == 'LUA' or t.planeta2_nome == 'LUA')
+                            if (t.planeta1 == swe.MOON or t.planeta2 == swe.MOON)
                             and t.jd_exato < jd_mudanca]
 
             if aspectos_lua:
@@ -660,21 +420,20 @@ class MapaAstral:
         self.eventos_astral.clear()
 
         for trans in self.transitos:
-            if trans.tipo in ['PAR', 'CPA']:
-                descricao = f"[{trans.planeta1_nome} {trans.tipo} {trans.planeta2_nome}] - DECL [{trans.pos_planeta1:.2f}° / {trans.pos_planeta2:.2f}°] - {trans.orbe:.5f}"
-            else:
-                sig1, pos1 = graus_para_signo_posicao(trans.pos_planeta1)
-                sig2, pos2 = graus_para_signo_posicao(trans.pos_planeta2)
+            p1_nome = PLANETA_REV.get(trans.planeta1, f'PL{trans.planeta1}')
+            p2_nome = PLANETA_REV.get(trans.planeta2, f'PL{trans.planeta2}')
 
-                asp_cod = None
-                for cod, (alvo, _) in ASPECTOS.items():
-                    if abs(trans.aspecto - alvo) < 0.1:
-                        asp_cod = cod
-                        break
-                asp_cod = asp_cod or '???'
+            sig1, pos1 = graus_para_signo_posicao(trans.pos_planeta1)
+            sig2, pos2 = graus_para_signo_posicao(trans.pos_planeta2)
 
-                descricao = f"[{trans.planeta1_nome} {asp_cod} {trans.planeta2_nome}] - {pos1} {sig1} / {pos2} {sig2} - {trans.orbe:.5f}"
+            asp_cod = None
+            for cod, (alvo, _) in ASPECTOS.items():
+                if abs(trans.aspecto - alvo) < 0.1:
+                    asp_cod = cod
+                    break
+            asp_cod = asp_cod or '???'
 
+            descricao = f"[{p1_nome} {asp_cod} {p2_nome}] - {pos1} {sig1} / {pos2} {sig2} - {trans.orbe:.5f}"
             evento = EventoAstral(trans.jd_exato, 'aspecto', descricao)
             self.eventos_astral.append(evento)
 
@@ -701,8 +460,7 @@ class MapaAstral:
         rel.append("=" * 100)
         rel.append(self.nome_mapa or "MAPA ASTRAL COMPLETO")
         rel.append("=" * 100)
-        rel.append(
-            f"Data: {self.dia:02d}/{self.mes:02d}/{self.ano}  Hora: {self.hora:02d}:{self.minuto:02d}:{self.segundo:02d} (UTC {self.timezone_horas:+.1f}h)")
+        rel.append(f"Data: {self.dia:02d}/{self.mes:02d}/{self.ano}  Hora: {self.hora:02d}:{self.minuto:02d}:{self.segundo:02d} (UTC {self.timezone_horas:+.1f}h)")
         if self.cidade or self.estado or self.pais:
             rel.append(f"Local: {self.cidade} / {self.estado} / {self.pais}")
         rel.append(f"Lat: {self.latitude:.6f}  Lon: {self.longitude:.6f}")
@@ -711,7 +469,7 @@ class MapaAstral:
 
         rel.append("PLANETAS:")
         rel.append("-" * 100)
-        for nome in list(PLANETAS.keys()) + ['ASC', 'MC', 'FOR']:
+        for nome in PLANETAS.keys():
             if nome in self.planetas:
                 c = self.planetas[nome]
                 mov = c.mov.upper()
@@ -755,6 +513,7 @@ class MapaAstral:
 
         rel.append("")
         rel.append("=" * 100)
+        rel.append("")
         rel.append("ASTRO-ANALISE")
         rel.append("PROGRAMA FEITO POR ADONIS SALIBA (Out 2025)")
         rel.append("(uso gratuito e franqueado)")
@@ -770,7 +529,6 @@ class MapaAstral:
 @app.route('/')
 def index():
     now = datetime.now()
-    hora_ajustada = (now.hour - 3) % 24
     html = '''<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -818,7 +576,7 @@ button:hover{transform:translateY(-2px)}
 </div>
 <label>Hora / Min / Seg (Hora Local)</label>
 <div class="row">
-<input type="number" id="hora" min="0" max="23" value="''' + str(hora_ajustada) + '''" required>
+<input type="number" id="hora" min="0" max="23" value="''' + str(now.hour) + '''" required>
 <input type="number" id="minuto" min="0" max="59" value="''' + str(now.minute) + '''" required>
 <input type="number" id="segundo" min="0" max="59" value="''' + str(now.second) + '''" required>
 </div>
@@ -892,6 +650,13 @@ function abrirBusca() {
   document.getElementById('search').focus();
 }
 
+function atualizarHoraLocal() {
+  let tz = parseFloat(document.getElementById('tz').value);
+  let hora_atual = parseInt(document.getElementById('hora').value);
+  let nova_hora = ((hora_atual + tz) % 24 + 24) % 24;
+  document.getElementById('hora').value = Math.floor(nova_hora);
+}
+
 document.getElementById('search').addEventListener('input', async function(e) {
   let q = e.target.value;
   if (q.length < 2) {
@@ -926,6 +691,7 @@ document.getElementById('search').addEventListener('input', async function(e) {
       document.getElementById('lons').value = lonS;
       document.getElementById('lonh').value = (d.lon < 0 ? 'W' : 'E');
       document.getElementById('tz').value = d.tz;
+      atualizarHoraLocal();
       document.getElementById('modal').style.display = 'none';
     };
     document.getElementById('cidades-list').appendChild(div);
