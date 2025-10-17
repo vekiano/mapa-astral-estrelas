@@ -344,7 +344,7 @@ class MapaAstral:
                         if min(gap_atual, gap_prox) <= orbe:
                             jd_exato, orbe_final = buscar_transito_exato(jd_atual, jd_prox, p1, p2, aspecto_deg, orbe)
 
-                            if jd_exato > 0 and jd_inicio <= jd_exato <= jd_fim and orbe_final < 0.05:
+                            if jd_exato > 0 and jd_inicio <= jd_exato <= jd_fim and orbe_final < orbe:
                                 pos1_ex = calcular_posicao_planeta(jd_exato, p1)
                                 pos2_ex = calcular_posicao_planeta(jd_exato, p2)
 
@@ -571,13 +571,13 @@ button:hover{transform:translateY(-2px)}
 <input type="text" id="nome" value="Mapa do Momento" required style="width:100%">
 <label>Dia / Mes / Ano</label>
 <div class="row">
-<input type="number" id="dia" min="1" max="31" value="''' + str(hora_ajustada) + '''" required>
+<input type="number" id="dia" min="1" max="31" value="''' + str(now.day) + '''" required>
 <input type="number" id="mes" min="1" max="12" value="''' + str(now.month) + '''" required>
 <input type="number" id="ano" value="''' + str(now.year) + '''" required>
 </div>
 <label>Hora / Min / Seg (Hora Local)</label>
 <div class="row">
-<input type="number" id="hora" min="0" max="23" value="''' + str(now.hour) + '''" required>
+<input type="number" id="hora" min="0" max="23" value="''' + str(hora_ajustada) + '''" required>
 <input type="number" id="minuto" min="0" max="59" value="''' + str(now.minute) + '''" required>
 <input type="number" id="segundo" min="0" max="59" value="''' + str(now.second) + '''" required>
 </div>
