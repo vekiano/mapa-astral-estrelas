@@ -541,8 +541,8 @@ class MapaAstral:
 
 @app.route('/')
 def index():
-    now = datetime.now()
-    hora_ajustada = (now.hour - 3) % 24
+    now = datetime.utcnow()
+    # hora_ajustada = (now.hour - 3) % 24
     html = '''<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -590,7 +590,7 @@ button:hover{transform:translateY(-2px)}
 </div>
 <label>Hora / Min / Seg (Hora Local)</label>
 <div class="row">
-<input type="number" id="hora" min="0" max="23" value="''' + str(hora_ajustada) + '''" required>
+<input type="number" id="hora" min="0" max="23" value="''' + str(now.hour) + '''" required>
 <input type="number" id="minuto" min="0" max="59" value="''' + str(now.minute) + '''" required>
 <input type="number" id="segundo" min="0" max="59" value="''' + str(now.second) + '''" required>
 </div>
@@ -664,12 +664,25 @@ function abrirBusca() {
   document.getElementById('search').focus();
 }
 
-function atualizarHoraLocal() {
+function atualizarHoraParaTimeZone() {
   let tz = parseFloat(document.getElementById('tz').value);
-  let hora_atual = parseInt(document.getElementById('hora').value);
-  let nova_hora = ((hora_atual + tz) % 24 + 24) % 24;
+  let now = new Date();
+  
+  // Pega a hora UTC do sistema (sempre consistente)
+  let hora_utc = now.getUTCHours();
+  let minuto_utc = now.getUTCMinutes();
+  let segundo_utc = now.getUTCSeconds();
+  
+  // Converte para hora local do timezone selecionado
+  let nova_hora = (hora_utc + tz + 24) % 24;
+  
+  // Atualiza os campos
   document.getElementById('hora').value = Math.floor(nova_hora);
+  document.getElementById('minuto').value = minuto_utc;
+  document.getElementById('segundo').value = segundo_utc;
 }
+
+// NO EVENTO DE BUSCA DE CIDADE, ALTERE ISTO:
 
 document.getElementById('search').addEventListener('input', async function(e) {
   let q = e.target.value;
@@ -705,7 +718,7 @@ document.getElementById('search').addEventListener('input', async function(e) {
       document.getElementById('lons').value = lonS;
       document.getElementById('lonh').value = (d.lon < 0 ? 'W' : 'E');
       document.getElementById('tz').value = d.tz;
-      atualizarHoraLocal();
+      atualizarHoraParaTimeZone();
       document.getElementById('modal').style.display = 'none';
     };
     document.getElementById('cidades-list').appendChild(div);
