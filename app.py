@@ -145,8 +145,95 @@ def determinar_intervalo(planeta1: int, planeta2: int) -> float:
     return intervalos.get(planeta_lento, 0.5)
 
 
-def buscar_transito_exato(jd_inicio: float, jd_fim: float, planeta1: int, planeta2: int,
-                          angulo_aspecto: float, orbe: float) -> Tuple[float, float]:
+def buscar_transito_exato_ponto_fixo(jd_inicio: float, jd_fim: float, planeta: int,
+                                     ponto_lon_fixo: float, angulo_aspecto: float, orbe: float) -> Tuple[float, float]:
+    """Busca trânsito de um planeta sobre um ângulo fixo (ASC/MC/FOR)"""
+    NUM_SAMPLES = 12
+    BISSECCOES_MAX = 6
+    SECANTE_JUMP_MAX = 1.0
+    DELTA_MIN = 1.0e-10
+    ORBE_LIMITE = orbe * 1.5
+
+    def calcular_orbe_atual(jd: float) -> float:
+        p1 = calcular_posicao_planeta(jd, planeta)
+        diff = angular_difference(p1, ponto_lon_fixo)
+        return diff - angulo_aspecto
+
+    # Amostragem inicial
+    delta_tempo = (jd_fim - jd_inicio) / (NUM_SAMPLES - 1)
+    amostras = []
+    melhor_orbe = 999
+    melhor_jd = 0
+
+    for i in range(NUM_SAMPLES):
+        jd_sample = jd_inicio + i * delta_tempo
+        orbe_val = abs(calcular_orbe_atual(jd_sample))
+        amostras.append((jd_sample, orbe_val))
+        if orbe_val < melhor_orbe:
+            melhor_orbe = orbe_val
+            melhor_jd = jd_sample
+
+    if melhor_orbe > ORBE_LIMITE:
+        return 0, 999
+
+    # Encontrar intervalo com mínimo
+    jd1, jd2 = 0, 0
+    for i in range(1, NUM_SAMPLES - 1):
+        if amostras[i - 1][1] > amostras[i][1] < amostras[i + 1][1]:
+            jd1, jd2 = amostras[i - 1][0], amostras[i + 1][0]
+            break
+
+    if jd1 == 0:
+        idx = [i for i, (jd, _) in enumerate(amostras) if jd == melhor_jd][0]
+        idx1 = max(0, idx - 1)
+        idx2 = min(NUM_SAMPLES - 1, idx + 1)
+        jd1, jd2 = amostras[idx1][0], amostras[idx2][0]
+
+    # Bissecção
+    for _ in range(BISSECCOES_MAX):
+        jd_meio = (jd1 + jd2) / 2
+        orbe_meio = abs(calcular_orbe_atual(jd_meio))
+        if orbe_meio < melhor_orbe:
+            melhor_orbe = orbe_meio
+            melhor_jd = jd_meio
+        if orbe_meio <= 0.001:
+            return jd_meio, orbe_meio
+
+        orbe1 = abs(calcular_orbe_atual(jd1))
+        orbe2 = abs(calcular_orbe_atual(jd2))
+        if orbe1 < orbe2:
+            jd2 = jd_meio
+        else:
+            jd1 = jd_meio
+
+    # Método das secantes para refinamento
+    jd = melhor_jd
+    dx = (jd2 - jd1) / 4
+
+    for _ in range(20):
+        jd_ant = jd
+        jd_prox = jd + dx
+        orbe_ant = calcular_orbe_atual(jd_ant)
+        orbe_prox = calcular_orbe_atual(jd_prox)
+
+        if abs(orbe_prox - orbe_ant) < DELTA_MIN:
+            break
+
+        dx = -orbe_ant * (jd_prox - jd_ant) / (orbe_prox - orbe_ant)
+        if abs(dx) > SECANTE_JUMP_MAX:
+            dx = SECANTE_JUMP_MAX if dx > 0 else -SECANTE_JUMP_MAX
+
+        jd = jd_ant + dx
+        orbe = abs(calcular_orbe_atual(jd))
+
+        if orbe < melhor_orbe:
+            melhor_orbe = orbe
+            melhor_jd = jd
+
+        if orbe <= 0.001 or abs(dx) < 0.0001:
+            return jd, orbe
+
+    return (melhor_jd, melhor_orbe) if melhor_orbe <= orbe else (0, 999)
     """Busca o momento exato de um trânsito com método das secantes"""
     NUM_SAMPLES = 12
     BISSECCOES_MAX = 6
@@ -390,9 +477,9 @@ class MapaAstral:
         # TRÂNSITOS DE PLANETAS SOBRE ASC/MC/FOR (fixos do mapa natal)
         for p1_nome in planetas_list:
             p1 = PLANETAS[p1_nome]
+            intervalo = determinar_intervalo(p1, p1)
 
             for aspecto_deg, orbe in ORBES_PADRAO.items():
-                intervalo = determinar_intervalo(p1, p1)
                 jd_atual = jd_inicio
 
                 while jd_atual < jd_fim:
@@ -410,9 +497,9 @@ class MapaAstral:
                         gap_prox = abs(diff_prox - aspecto_deg)
 
                         if min(gap_atual, gap_prox) <= orbe:
-                            jd_exato, orbe_final = buscar_transito_exato(jd_atual, jd_prox, p1, swe.SUN, aspecto_deg, orbe)
+                            jd_exato, orbe_final = buscar_transito_exato_ponto_fixo(jd_atual, jd_prox, p1, ponto_lon, aspecto_deg, orbe)
 
-                            if jd_exato > 0 and jd_inicio <= jd_exato <= jd_fim and orbe_final < 0.05:
+                            if jd_exato > 0 and jd_inicio <= jd_exato <= jd_fim:
                                 pos1_ex = calcular_posicao_planeta(jd_exato, p1)
                                 trans = Transito(jd_exato, p1_nome, ponto_nome, aspecto_deg, pos1_ex, ponto_lon,
                                                  orbe_final, 'aspecto')
