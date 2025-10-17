@@ -242,9 +242,8 @@ def buscar_transito_exato_ponto_fixo(jd_inicio: float, jd_fim: float, planeta: i
     ORBE_LIMITE = orbe * 1.5
 
     def calcular_orbe_atual(jd: float) -> float:
-        p1 = calcular_posicao_planeta(jd, planeta1)
-        p2 = calcular_posicao_planeta(jd, planeta2)
-        diff = angular_difference(p1, p2)
+        p1 = calcular_posicao_planeta(jd, planeta)  # ✓ planeta (que foi passado como parâmetro)
+        diff = angular_difference(p1, ponto_lon_fixo)  # ✓ compara com ponto fixo
         return diff - angulo_aspecto
 
     # Amostragem inicial
