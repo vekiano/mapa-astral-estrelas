@@ -276,6 +276,52 @@ class MapaAstral:
                             'pos1': pos1, 'sig1': sig1, 'pos2': pos2, 'sig2': sig2,
                         })
 
+    def _deduplicate_transitos(self, janela_tempo: float = 0.15) -> None:
+        """Remove duplicatas de trânsitos mantendo apenas o com menor orbe"""
+        if not self.transitos:
+            return
+
+        grupos = {}
+        for trans in self.transitos:
+            # Criar chave de agrupamento
+            asp_key = round(trans.aspecto, 1)
+            chave = (trans.planeta1_nome, trans.planeta2_nome, asp_key)
+            if chave not in grupos:
+                grupos[chave] = []
+            grupos[chave].append(trans)
+
+        transitos_filtrados = []
+
+        for chave, transitos_grupo in grupos.items():
+            if len(transitos_grupo) == 1:
+                transitos_filtrados.append(transitos_grupo[0])
+                continue
+
+            # Ordenar por tempo
+            transitos_grupo.sort(key=lambda x: x.jd_exato)
+
+            # Agrupar por janela de tempo
+            subclusters = []
+            cluster_atual = [transitos_grupo[0]]
+
+            for i in range(1, len(transitos_grupo)):
+                if transitos_grupo[i].jd_exato - transitos_grupo[i - 1].jd_exato <= janela_tempo:
+                    cluster_atual.append(transitos_grupo[i])
+                else:
+                    subclusters.append(cluster_atual)
+                    cluster_atual = [transitos_grupo[i]]
+
+            if cluster_atual:
+                subclusters.append(cluster_atual)
+
+            # Manter apenas o de menor orbe em cada cluster
+            for cluster in subclusters:
+                melhor = min(cluster, key=lambda x: x.orbe)
+                transitos_filtrados.append(melhor)
+
+        transitos_filtrados.sort(key=lambda x: x.jd_exato)
+        self.transitos = transitos_filtrados
+
     def calcular_transitos(self, dias_margem: int = 2):
         self.transitos.clear()
 
@@ -357,6 +403,9 @@ class MapaAstral:
                                 self.transitos.append(trans)
 
                     jd_atual = jd_prox
+
+        # APLICAR DEDUPLICAÇÃO
+        self._deduplicate_transitos(janela_tempo=0.15)
 
     def calcular_mudancas_signo(self, dias_margem: int = 2):
         self.mudancas_signo.clear()
