@@ -542,6 +542,8 @@ class MapaAstral:
 @app.route('/')
 def index():
     now = datetime.utcnow()
+    timezone_padrao = -3  # Brasília
+    hora_ajustada = (now.hour + timezone_padrao + 24) % 24
     # hora_ajustada = (now.hour - 3) % 24
     html = '''<!DOCTYPE html>
 <html lang="pt-BR">
@@ -590,7 +592,7 @@ button:hover{transform:translateY(-2px)}
 </div>
 <label>Hora / Min / Seg (Hora Local)</label>
 <div class="row">
-<input type="number" id="hora" min="0" max="23" value="''' + str(now.hour) + '''" required>
+<input type="number" id="hora" min="0" max="23" value="''' + str(hora_ajustada) + '''" required>
 <input type="number" id="minuto" min="0" max="59" value="''' + str(now.minute) + '''" required>
 <input type="number" id="segundo" min="0" max="59" value="''' + str(now.second) + '''" required>
 </div>
