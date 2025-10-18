@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from typing import Tuple
 from dataclasses import dataclass
 from flask import Flask, request, jsonify
+import pytz
 
 try:
     import swisseph as swe
@@ -115,32 +116,31 @@ def calcular_declinacao_planeta(jd: float, planeta: int) -> float:
 
 def determinar_intervalo(planeta1: int, planeta2: int) -> float:
     planeta_lento = max(planeta1, planeta2)
-    # intervalos = {
-    #     swe.MOON: 0.01, swe.MERCURY: 0.05, swe.VENUS: 0.05, swe.SUN: 0.05,
-    #     swe.MARS: 0.1, swe.JUPITER: 0.2, swe.SATURN: 0.5, swe.URANUS: 1.0,
-    #     swe.NEPTUNE: 1.0, swe.PLUTO: 1.0, swe.TRUE_NODE: 0.5,
-    # }
     intervalos = {
-        swe.MOON: 0.005,
-        swe.MERCURY: 0.02,
-        swe.VENUS: 0.02,
-        swe.SUN: 0.05,
-        swe.MARS: 0.05,  # aumentar precisão
-        swe.JUPITER: 0.1,
-        swe.SATURN: 0.2,
-        swe.URANUS: 0.5,
-        swe.NEPTUNE: 0.5,
-        swe.PLUTO: 0.5,
-        swe.TRUE_NODE: 0.2,
+        swe.MOON: 0.005, swe.MERCURY: 0.02, swe.VENUS: 0.02, swe.SUN: 0.05,
+        swe.MARS: 0.05, swe.JUPITER: 0.1, swe.SATURN: 0.2, swe.URANUS: 0.5,
+        swe.NEPTUNE: 0.5, swe.PLUTO: 0.5, swe.TRUE_NODE: 0.2,
     }
     return intervalos.get(planeta_lento, 0.5)
+
+
+def calcular_timezone_com_dst(tz_name, dia, mes, ano):
+    try:
+        if not tz_name or tz_name == '':
+            return -3.0
+        tz = pytz.timezone(tz_name)
+        dt_local = datetime(ano, mes, dia, 12, 0, 0)
+        dt_aware = tz.localize(dt_local)
+        offset_seconds = dt_aware.utcoffset().total_seconds()
+        return offset_seconds / 3600
+    except:
+        return -3.0
 
 
 def buscar_transito_exato(jd_inicio: float, jd_fim: float, planeta1: int, planeta2: int,
                           angulo_aspecto: float, orbe: float) -> Tuple[float, float]:
     NUM_SAMPLES = 24
     BISSECCOES_MAX = 10
-    DELTA_MIN = 1.0e-10
     ORBE_LIMITE = orbe * 1.5
 
     def calcular_orbe_atual(jd: float) -> float:
@@ -221,7 +221,8 @@ def buscar_mudanca_signo_exata(jd1: float, jd2: float, planeta: int, signo_saida
 
 class MapaAstral:
     def __init__(self, nome_mapa, dia, mes, ano, hora, minuto, segundo,
-                 latitude_dec, longitude_dec, timezone_horas, cidade='', estado='', pais='', house_system_label='Regiomontanus'):
+                 latitude_dec, longitude_dec, timezone_horas, cidade='', estado='', pais='',
+                 house_system_label='Regiomontanus'):
         self.nome_mapa = nome_mapa.strip()
         self.dia, self.mes, self.ano = dia, mes, ano
         self.hora, self.minuto, self.segundo = hora, minuto, segundo
@@ -285,18 +286,13 @@ class MapaAstral:
 
         grupos = {}
         for trans in self.transitos:
-            if trans.tipo in ['PAR', 'CPA']:
-                asp_key = trans.tipo
-            else:
-                asp_key = round(trans.aspecto, 1)
-
+            asp_key = round(trans.aspecto, 1)
             chave = (trans.planeta1, trans.planeta2, asp_key)
             if chave not in grupos:
                 grupos[chave] = []
             grupos[chave].append(trans)
 
         transitos_filtrados = []
-
         for chave, transitos_grupo in grupos.items():
             if len(transitos_grupo) == 1:
                 transitos_filtrados.append(transitos_grupo[0])
@@ -325,7 +321,6 @@ class MapaAstral:
 
     def calcular_transitos(self, dias_margem: int = 2):
         self.transitos.clear()
-
         dt_inicio = self.dt_utc - timedelta(days=dias_margem)
         dt_fim = self.dt_utc + timedelta(days=dias_margem)
         jd_inicio = dt_to_jd_utc(dt_inicio)
@@ -342,7 +337,6 @@ class MapaAstral:
 
                     while jd_atual < jd_fim:
                         jd_prox = min(jd_atual + intervalo, jd_fim)
-
                         pos1 = calcular_posicao_planeta(jd_atual, p1)
                         pos2 = calcular_posicao_planeta(jd_atual, p2)
                         diff_atual = angular_difference(pos1, pos2)
@@ -360,7 +354,6 @@ class MapaAstral:
                             if jd_exato > 0 and jd_inicio <= jd_exato <= jd_fim and orbe_final < 0.005:
                                 pos1_ex = calcular_posicao_planeta(jd_exato, p1)
                                 pos2_ex = calcular_posicao_planeta(jd_exato, p2)
-
                                 trans = Transito(jd_exato, p1, p2, aspecto_deg, pos1_ex, pos2_ex, orbe_final, 'aspecto')
                                 self.transitos.append(trans)
 
@@ -370,7 +363,6 @@ class MapaAstral:
 
     def calcular_mudancas_signo(self, dias_margem: int = 2):
         self.mudancas_signo.clear()
-
         dt_inicio = self.dt_utc - timedelta(days=dias_margem)
         dt_fim = self.dt_utc + timedelta(days=dias_margem)
         jd_inicio = dt_to_jd_utc(dt_inicio)
@@ -387,7 +379,6 @@ class MapaAstral:
 
                 if signo_anterior is not None and signo_atual != signo_anterior:
                     jd_mudanca = buscar_mudanca_signo_exata(jd_atual - intervalo, jd_atual, code, signo_anterior)
-
                     if jd_inicio <= jd_mudanca <= jd_fim:
                         sig_entrada = SIGNOS[signo_atual]
                         descricao = f"{nome} entra em {sig_entrada}"
@@ -399,12 +390,10 @@ class MapaAstral:
 
     def calcular_voc_lua(self):
         self.voc_periodos.clear()
-
         mudancas_lua = [e for e in self.mudancas_signo if 'LUA' in e.descricao]
 
         for mudanca_evento in mudancas_lua:
             jd_mudanca = mudanca_evento.jd_exato
-
             aspectos_lua = [t for t in self.transitos
                             if (t.planeta1 == swe.MOON or t.planeta2 == swe.MOON)
                             and t.jd_exato < jd_mudanca]
@@ -416,16 +405,13 @@ class MapaAstral:
 
                 duracao_dias = jd_voc_fim - jd_voc_inicio
                 duracao_hms = dias_para_hms(duracao_dias)
-
                 signo_entrada = mudanca_evento.descricao.split()[-1]
                 lon_antes = calcular_posicao_planeta(jd_voc_inicio, swe.MOON)
                 signo_saida = SIGNOS[int(lon_antes / 30.0) % 12]
 
                 self.voc_periodos.append({
-                    'jd_inicio': jd_voc_inicio,
-                    'jd_fim': jd_voc_fim,
-                    'signo_saida': signo_saida,
-                    'signo_entrada': signo_entrada,
+                    'jd_inicio': jd_voc_inicio, 'jd_fim': jd_voc_fim,
+                    'signo_saida': signo_saida, 'signo_entrada': signo_entrada,
                     'duracao_hms': duracao_hms,
                 })
 
@@ -435,7 +421,6 @@ class MapaAstral:
         for trans in self.transitos:
             p1_nome = PLANETA_REV.get(trans.planeta1, f'PL{trans.planeta1}')
             p2_nome = PLANETA_REV.get(trans.planeta2, f'PL{trans.planeta2}')
-
             sig1, pos1 = graus_para_signo_posicao(trans.pos_planeta1)
             sig2, pos2 = graus_para_signo_posicao(trans.pos_planeta2)
 
@@ -473,7 +458,8 @@ class MapaAstral:
         rel.append("=" * 100)
         rel.append(self.nome_mapa or "MAPA ASTRAL COMPLETO")
         rel.append("=" * 100)
-        rel.append(f"Data: {self.dia:02d}/{self.mes:02d}/{self.ano}  Hora: {self.hora:02d}:{self.minuto:02d}:{self.segundo:02d} (UTC {self.timezone_horas:+.1f}h)")
+        rel.append(
+            f"Data: {self.dia:02d}/{self.mes:02d}/{self.ano}  Hora: {self.hora:02d}:{self.minuto:02d}:{self.segundo:02d} (UTC {self.timezone_horas:+.1f}h)")
         if self.cidade or self.estado or self.pais:
             rel.append(f"Local: {self.cidade} / {self.estado} / {self.pais}")
         rel.append(f"Lat: {self.latitude:.6f}  Lon: {self.longitude:.6f}")
@@ -526,53 +512,42 @@ class MapaAstral:
 
         rel.append("")
         rel.append("=" * 100)
-        rel.append("")
-        rel.append("ASTRO-ANALISE")
-        rel.append("PROGRAMA FEITO POR ADONIS SALIBA (Out 2025)")
-        rel.append("(uso gratuito e franqueado)")
-        rel.append("")
-        rel.append("Para analise do mapa horario por IA:")
-        rel.append("https://chatgpt.com/g/g-EumgPewMI-astrologia-horaria-guia")
-        rel.append("")
-        rel.append("=" * 100)
-
         return "\n".join(rel)
 
 
 @app.route('/')
 def index():
-    now = datetime.utcnow()
-    # hora_ajustada = (now.hour - 3) % 24
-    html = '''<!DOCTYPE html>
+    now = datetime.now(timezone.utc)
+    return f'''<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Mapa Astral</title>
 <style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:Arial;background:linear-gradient(135deg,#667eea,#764ba2);min-height:100vh;padding:20px}
-.container{max-width:680px;margin:0 auto;background:white;border-radius:12px;padding:25px;box-shadow:0 20px 60px rgba(0,0,0,0.3)}
-h1{text-align:center;color:#333;margin-bottom:18px;font-size:24px}
-fieldset{border:1px solid #ddd;border-radius:8px;padding:12px;margin-bottom:15px}
-legend{padding:0 8px;color:#667eea;font-weight:bold;font-size:13px}
-input,select{padding:5px;margin:3px 0;border:1px solid #ddd;border-radius:4px;font-size:11px}
-label{font-size:11px;color:#555;display:block;margin-top:4px;margin-bottom:2px}
-.row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-bottom:8px}
-.row3{display:grid;grid-template-columns:60px 60px 60px 45px;gap:3px;margin-bottom:8px}
-.row2{display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:6px;margin-bottom:8px}
-.rowtz{display:grid;grid-template-columns:100px 1fr;gap:6px;margin-bottom:8px}
-button{width:100%;padding:8px;background:linear-gradient(135deg,#667eea,#764ba2);color:white;border:none;border-radius:4px;cursor:pointer;font-weight:bold;font-size:12px}
-button:hover{transform:translateY(-2px)}
-.resultado{margin-top:20px;padding:15px;background:#f0f9ff;border-radius:8px;display:none;max-height:500px;overflow-y:auto}
-.resultado pre{font-family:monospace;font-size:10px;color:#1e3a8a}
-.loading{display:none;text-align:center;color:#667eea;font-weight:bold;font-size:12px}
-#modal{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center}
-#modal>div{background:white;padding:20px;border-radius:8px;width:90%;max-width:400px}
-#cidades-list{max-height:200px;overflow-y:auto;border:1px solid #ddd;border-radius:4px}
-.cidade-item{padding:8px;border-bottom:1px solid #eee;cursor:pointer;font-size:11px}
-.cidade-item:hover{background:#f0f9ff}
-.btn-copy{margin-top:10px;width:auto;display:inline-block;padding:6px 12px;font-size:11px}
+*{{margin:0;padding:0;box-sizing:border-box}}
+body{{font-family:Arial;background:linear-gradient(135deg,#667eea,#764ba2);min-height:100vh;padding:20px}}
+.container{{max-width:680px;margin:0 auto;background:white;border-radius:12px;padding:25px;box-shadow:0 20px 60px rgba(0,0,0,0.3)}}
+h1{{text-align:center;color:#333;margin-bottom:18px;font-size:24px}}
+fieldset{{border:1px solid #ddd;border-radius:8px;padding:12px;margin-bottom:15px}}
+legend{{padding:0 8px;color:#667eea;font-weight:bold;font-size:13px}}
+input,select{{padding:5px;margin:3px 0;border:1px solid #ddd;border-radius:4px;font-size:11px;width:100%}}
+label{{font-size:11px;color:#555;display:block;margin-top:4px;margin-bottom:2px}}
+.row{{display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-bottom:8px}}
+.row3{{display:grid;grid-template-columns:60px 60px 60px 45px;gap:3px;margin-bottom:8px}}
+.row2{{display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:6px;margin-bottom:8px}}
+button{{padding:8px;background:linear-gradient(135deg,#667eea,#764ba2);color:white;border:none;border-radius:4px;cursor:pointer;font-weight:bold;font-size:12px;width:100%}}
+button:hover{{transform:translateY(-2px)}}
+.btn-buscar{{width:auto;padding:5px 10px}}
+.resultado{{margin-top:20px;padding:15px;background:#f0f9ff;border-radius:8px;display:none;max-height:500px;overflow-y:auto}}
+.resultado pre{{font-family:monospace;font-size:10px;color:#1e3a8a;white-space:pre-wrap}}
+.loading{{display:none;text-align:center;color:#667eea;font-weight:bold}}
+#modal{{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center}}
+#modal>div{{background:white;padding:20px;border-radius:8px;width:90%;max-width:400px}}
+#cidades-list{{max-height:200px;overflow-y:auto;border:1px solid #ddd;border-radius:4px}}
+.cidade-item{{padding:8px;border-bottom:1px solid #eee;cursor:pointer;font-size:11px}}
+.cidade-item:hover{{background:#f0f9ff}}
+.btn-copy{{width:auto;display:inline-block;padding:6px 12px;font-size:11px;margin-top:10px}}
 </style>
 </head>
 <body>
@@ -581,18 +556,18 @@ button:hover{transform:translateY(-2px)}
 <form id="f">
 <fieldset>
 <legend>Identificacao</legend>
-<input type="text" id="nome" value="Mapa do Momento" required style="width:100%">
+<input type="text" id="nome" value="Mapa do Momento" required>
 <label>Dia / Mes / Ano</label>
 <div class="row">
-<input type="number" id="dia" min="1" max="31" value="''' + str(now.day) + '''" required>
-<input type="number" id="mes" min="1" max="12" value="''' + str(now.month) + '''" required>
-<input type="number" id="ano" value="''' + str(now.year) + '''" required>
+<input type="number" id="dia" min="1" max="31" value="{now.day}" required>
+<input type="number" id="mes" min="1" max="12" value="{now.month}" required>
+<input type="number" id="ano" value="{now.year}" required>
 </div>
 <label>Hora / Min / Seg (Hora Local)</label>
 <div class="row">
-<input type="number" id="hora" min="0" max="23" value="''' + str(now.hour) + '''" required>
-<input type="number" id="minuto" min="0" max="59" value="''' + str(now.minute) + '''" required>
-<input type="number" id="segundo" min="0" max="59" value="''' + str(now.second) + '''" required>
+<input type="number" id="hora" min="0" max="23" value="{now.hour}" required>
+<input type="number" id="minuto" min="0" max="59" value="{now.minute}" required>
+<input type="number" id="segundo" min="0" max="59" value="{now.second}" required>
 </div>
 </fieldset>
 <fieldset>
@@ -601,28 +576,26 @@ button:hover{transform:translateY(-2px)}
 <input type="text" id="cidade" value="Brasilia" required placeholder="Cidade">
 <input type="text" id="estado" value="DF" required placeholder="Estado">
 <input type="text" id="pais" value="Brasil" required placeholder="Pais">
-<button type="button" onclick="abrirBusca()" style="width:auto;padding:5px 10px">Buscar</button>
+<button type="button" class="btn-buscar" onclick="abrirBusca()">Buscar</button>
 </div>
-<label>Latitude ... graus  minutos  segundos</label>
+<label>Latitude (graus minutos segundos)</label>
 <div class="row3">
 <input type="number" id="latg" min="0" max="90" value="15" required>
 <input type="number" id="latm" min="0" max="59" value="46" required>
 <input type="number" id="lats" min="0" max="59" value="12" required>
-<select id="lath" style="width:100%"><option>N</option><option selected>S</option></select>
+<select id="lath"><option>N</option><option selected>S</option></select>
 </div>
-<label>Longitude ... graus minutos segundos</label>
+<label>Longitude (graus minutos segundos)</label>
 <div class="row3">
 <input type="number" id="long" min="0" max="180" value="47" required>
 <input type="number" id="lonm" min="0" max="59" value="55" required>
 <input type="number" id="lons" min="0" max="59" value="12" required>
-<select id="lonh" style="width:100%"><option>E</option><option selected>W</option></select>
+<select id="lonh"><option>E</option><option selected>W</option></select>
 </div>
 <label>Zona de Tempo (UTC)</label>
-<div class="rowtz">
-<input type="number" id="tz" step="0.5" value="-3" required style="width:100%">
-</div>
+<input type="number" id="tz" step="0.5" value="-3" required>
 <label>Casas Terrestres</label>
-<select id="houseSys" style="width:100%">
+<select id="houseSys">
 <option>Regiomontanus</option>
 <option>Placidus</option>
 <option>Campanus</option>
@@ -640,102 +613,128 @@ button:hover{transform:translateY(-2px)}
 </div>
 
 <div id="modal"><div>
-<h3 style="font-size:14px;margin-bottom:10px">Buscar Cidade</h3>
-<input type="text" id="search" placeholder="Digite a cidade..." style="width:100%;padding:8px;margin:10px 0;border:1px solid #ddd;border-radius:4px;font-size:12px">
+<h3>Buscar Cidade</h3>
+<input type="text" id="search" placeholder="Digite a cidade...">
 <div id="cidades-list"></div>
-<button onclick="document.getElementById('modal').style.display='none'" style="margin-top:10px;padding:6px">Fechar</button>
+<button onclick="document.getElementById('modal').style.display='none'" style="margin-top:10px">Fechar</button>
 </div></div>
 
 <script>
-function dmsToDecimal(g, m, s, h) {
+function dmsToDecimal(g, m, s, h) {{
   let d = Math.abs(g) + Math.abs(m)/60 + Math.abs(s)/3600;
   return (h == 'S' || h == 'W') ? -d : d;
-}
+}}
 
-function copiarResultado() {
-  let txt = document.getElementById('txt').textContent;
-  navigator.clipboard.writeText(txt).then(function() {
-    alert('Texto copiado para memoria!');
-  });
-}
+function copiarResultado() {{
+  navigator.clipboard.writeText(document.getElementById('txt').textContent).then(() => alert('Copiado!'));
+}}
 
-function abrirBusca() {
+function abrirBusca() {{
   document.getElementById('modal').style.display = 'flex';
-  document.getElementById('search').focus();
-}
+  let cidade = document.getElementById('cidade').value;
+  let search = document.getElementById('search');
+  search.value = cidade;
+  search.focus();
+}}
 
-function atualizarHoraParaTimeZone() {
+function atualizarHoraParaTimeZone() {{
   let tz = parseFloat(document.getElementById('tz').value);
   let now = new Date();
-  
-  // Pega a hora UTC do sistema (sempre consistente)
   let hora_utc = now.getUTCHours();
   let minuto_utc = now.getUTCMinutes();
   let segundo_utc = now.getUTCSeconds();
-  
-  // Converte para hora local do timezone selecionado
   let nova_hora = (hora_utc + tz + 24) % 24;
-  
-  // Atualiza os campos
+
   document.getElementById('hora').value = Math.floor(nova_hora);
   document.getElementById('minuto').value = minuto_utc;
   document.getElementById('segundo').value = segundo_utc;
-}
+}}
 
-// NO EVENTO DE BUSCA DE CIDADE, ALTERE ISTO:
+async function carregarCidadeDefault() {{
+  let cidade = document.getElementById('cidade').value;
+  let dia = parseInt(document.getElementById('dia').value);
+  let mes = parseInt(document.getElementById('mes').value);
+  let ano = parseInt(document.getElementById('ano').value);
 
-document.getElementById('search').addEventListener('input', async function(e) {
+  if (!cidade) return;
+
+  let r = await fetch('/api/cidades?q=' + cidade + '&dia=' + dia + '&mes=' + mes + '&ano=' + ano);
+  let c = await r.json();
+
+  if (c.length > 0) {{
+    let d = c[0];
+    document.getElementById('cidade').value = d.city;
+    document.getElementById('estado').value = d.state;
+    document.getElementById('pais').value = d.country;
+
+    let latD = Math.abs(d.lat), latG = Math.floor(latD), latM = Math.floor((latD - latG) * 60), latS = Math.round(((latD - latG) * 60 - latM) * 60);
+    document.getElementById('latg').value = latG;
+    document.getElementById('latm').value = latM;
+    document.getElementById('lats').value = latS;
+    document.getElementById('lath').value = (d.lat < 0 ? 'S' : 'N');
+
+    let lonD = Math.abs(d.lon), lonG = Math.floor(lonD), lonM = Math.floor((lonD - lonG) * 60), lonS = Math.round(((lonD - lonG) * 60 - lonM) * 60);
+    document.getElementById('long').value = lonG;
+    document.getElementById('lonm').value = lonM;
+    document.getElementById('lons').value = lonS;
+    document.getElementById('lonh').value = (d.lon < 0 ? 'W' : 'E');
+
+    document.getElementById('tz').value = d.tz;
+    atualizarHoraParaTimeZone();
+  }}
+}}
+
+document.getElementById('search').addEventListener('input', async function(e) {{
   let q = e.target.value;
-  if (q.length < 2) {
+  if (q.length < 2) {{
     document.getElementById('cidades-list').innerHTML = '';
     return;
-  }
-  let r = await fetch('/api/cidades?q=' + q);
+  }}
+
+  let dia = parseInt(document.getElementById('dia').value);
+  let mes = parseInt(document.getElementById('mes').value);
+  let ano = parseInt(document.getElementById('ano').value);
+
+  let r = await fetch('/api/cidades?q=' + q + '&dia=' + dia + '&mes=' + mes + '&ano=' + ano);
   let c = await r.json();
   document.getElementById('cidades-list').innerHTML = '';
-  c.forEach(function(d) {
+
+  c.forEach(function(d) {{
     let div = document.createElement('div');
     div.className = 'cidade-item';
     div.textContent = d.city + ', ' + d.state + ' - ' + d.country;
-    div.onclick = function() {
+    div.onclick = function() {{
       document.getElementById('cidade').value = d.city;
       document.getElementById('estado').value = d.state;
       document.getElementById('pais').value = d.country;
-      let latD = Math.abs(d.lat);
-      let latG = Math.floor(latD);
-      let latM = Math.floor((latD - latG) * 60);
-      let latS = Math.round(((latD - latG) * 60 - latM) * 60);
+
+      let latD = Math.abs(d.lat), latG = Math.floor(latD), latM = Math.floor((latD - latG) * 60), latS = Math.round(((latD - latG) * 60 - latM) * 60);
       document.getElementById('latg').value = latG;
       document.getElementById('latm').value = latM;
       document.getElementById('lats').value = latS;
       document.getElementById('lath').value = (d.lat < 0 ? 'S' : 'N');
-      let lonD = Math.abs(d.lon);
-      let lonG = Math.floor(lonD);
-      let lonM = Math.floor((lonD - lonG) * 60);
-      let lonS = Math.round(((lonD - lonG) * 60 - lonM) * 60);
+
+      let lonD = Math.abs(d.lon), lonG = Math.floor(lonD), lonM = Math.floor((lonD - lonG) * 60), lonS = Math.round(((lonD - lonG) * 60 - lonM) * 60);
       document.getElementById('long').value = lonG;
       document.getElementById('lonm').value = lonM;
       document.getElementById('lons').value = lonS;
       document.getElementById('lonh').value = (d.lon < 0 ? 'W' : 'E');
+
       document.getElementById('tz').value = d.tz;
       atualizarHoraParaTimeZone();
       document.getElementById('modal').style.display = 'none';
-    };
+    }};
     document.getElementById('cidades-list').appendChild(div);
-  });
-});
+  }});
+}});
 
-document.getElementById('f').addEventListener('submit', async function(e) {
+document.getElementById('f').addEventListener('submit', async function(e) {{
   e.preventDefault();
-  let lat = dmsToDecimal(parseInt(document.getElementById('latg').value), 
-                         parseInt(document.getElementById('latm').value), 
-                         parseInt(document.getElementById('lats').value), 
-                         document.getElementById('lath').value);
-  let lon = dmsToDecimal(parseInt(document.getElementById('long').value), 
-                         parseInt(document.getElementById('lonm').value), 
-                         parseInt(document.getElementById('lons').value), 
-                         document.getElementById('lonh').value);
-  let dados = {
+
+  let lat = dmsToDecimal(parseInt(document.getElementById('latg').value), parseInt(document.getElementById('latm').value), parseInt(document.getElementById('lats').value), document.getElementById('lath').value);
+  let lon = dmsToDecimal(parseInt(document.getElementById('long').value), parseInt(document.getElementById('lonm').value), parseInt(document.getElementById('lons').value), document.getElementById('lonh').value);
+
+  let dados = {{
     nome: document.getElementById('nome').value,
     dia: parseInt(document.getElementById('dia').value),
     mes: parseInt(document.getElementById('mes').value),
@@ -750,34 +749,42 @@ document.getElementById('f').addEventListener('submit', async function(e) {
     estado: document.getElementById('estado').value,
     pais: document.getElementById('pais').value,
     houseSys: document.getElementById('houseSys').value
-  };
+  }};
+
   document.getElementById('load').style.display = 'block';
   document.getElementById('res').style.display = 'none';
-  let res = await fetch('/api/calcular', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(dados)
-  });
+
+  let res = await fetch('/api/calcular', {{method: 'POST', headers: {{'Content-Type': 'application/json'}}, body: JSON.stringify(dados)}});
   let j = await res.json();
+
   document.getElementById('load').style.display = 'none';
-  if (j.status == 'ok') {
+  if (j.status == 'ok') {{
     document.getElementById('txt').textContent = j.relatorio;
     document.getElementById('res').style.display = 'block';
-  } else {
+  }} else {{
     alert('Erro: ' + j.msg);
-  }
-});
+  }}
+}});
+
+window.addEventListener('load', carregarCidadeDefault);
+document.getElementById('dia').addEventListener('change', carregarCidadeDefault);
+document.getElementById('mes').addEventListener('change', carregarCidadeDefault);
+document.getElementById('ano').addEventListener('change', carregarCidadeDefault);
 </script>
 </body>
 </html>'''
-    return html
 
 
 @app.route('/api/cidades')
 def cidades():
     q = request.args.get('q', '').lower()
+    dia = request.args.get('dia', datetime.now().day, type=int)
+    mes = request.args.get('mes', datetime.now().month, type=int)
+    ano = request.args.get('ano', datetime.now().year, type=int)
+
     cidmundo = os.path.join(os.path.dirname(__file__), 'CidMundo.txt')
     result = []
+
     if os.path.exists(cidmundo):
         try:
             with open(cidmundo, 'r', encoding='utf-8', errors='ignore') as f:
@@ -789,13 +796,13 @@ def cidades():
                         try:
                             city = p[3].lower()
                             if q in city:
+                                lat, lon = float(p[4]), float(p[5])
+                                tz_name = p[8].strip()
+                                tz_offset = calcular_timezone_com_dst(tz_name, dia, mes, ano)
+
                                 result.append({
-                                    'city': p[3],
-                                    'state': p[2],
-                                    'country': p[1],
-                                    'lat': float(p[4]),
-                                    'lon': float(p[5]),
-                                    'tz': float(p[8])
+                                    'city': p[3], 'state': p[2], 'country': p[1],
+                                    'lat': lat, 'lon': lon, 'tz': tz_offset, 'tz_name': tz_name
                                 })
                                 if len(result) >= 20:
                                     break
@@ -803,6 +810,7 @@ def cidades():
                             pass
         except:
             pass
+
     return jsonify(result)
 
 
