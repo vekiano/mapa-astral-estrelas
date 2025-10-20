@@ -646,6 +646,39 @@ class MapaAstral:
 
         rel.append("")
         rel.append("=" * 100)
+        rel.append("LEGENDA DE SIGLAS")
+        rel.append("=" * 100)
+        rel.append("")
+
+        rel.append("PLANETAS:")
+        rel.append("  SOL=Sol  LUA=Lua  MER=Mercúrio  VEN=Vênus  MAR=Marte")
+        rel.append("  JUP=Júpiter  SAT=Saturno  URA=Urano  NET=Netuno  PLU=Plutão  TNN=Nó Lunar")
+        rel.append("")
+
+        rel.append("PONTOS FIXOS:")
+        rel.append("  ASC=Ascendente  MC=Meio do Céu  FOR=Fortuna")
+        rel.append("")
+
+        rel.append("SIGNOS ZODIACAIS:")
+        rel.append("  AR=Áries  TA=Touro  GE=Gêmeos  CA=Câncer  LE=Leão  VI=Virgem")
+        rel.append("  LI=Libra  SC=Escorpião  SG=Sagitário  CP=Capricórnio  AQ=Aquário  PI=Peixes")
+        rel.append("")
+
+        rel.append("ASPECTOS:")
+        rel.append("  CJN=Conjunção (0°)  OPO=Oposição (180°)  TRI=Trígono (120°)")
+        rel.append("  SQR=Quadratura (90°)  SXT=Sextil (60°)  QCX=Quincúncio (150°)")
+        rel.append("  SSQ=Semisextil (45°)  SQQ=Sesquiquadratura (135°)")
+        rel.append("")
+
+        rel.append("MOVIMENTO:")
+        rel.append("  DIR=Direto  RET=Retrógrado")
+        rel.append("")
+
+        rel.append("TIPOS DE ASPECTO:")
+        rel.append("  [P-P]=Planeta-Planeta  [P-PT]=Planeta-Ponto Fixo  [PT-PT]=Ponto Fixo-Ponto Fixo")
+        rel.append("")
+
+        rel.append("=" * 100)
         rel.append("")
         rel.append("ASTRO-ANALISE")
         rel.append("PROGRAMA FEITO POR ADONIS SALIBA (Out 2025)")
