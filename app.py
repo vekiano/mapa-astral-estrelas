@@ -295,6 +295,8 @@ class MapaAstral:
 
     def calcular_aspectos(self):
         self.aspectos_natais.clear()
+
+        # Aspectos entre planetas
         nomes = list(PLANETAS.keys())
         for i, p1_nome in enumerate(nomes):
             for p2_nome in nomes[i + 1:]:
@@ -309,6 +311,44 @@ class MapaAstral:
                         self.aspectos_natais.append({
                             'p1': p1_nome, 'p2': p2_nome, 'cod': cod, 'orbe': gap,
                             'pos1': pos1, 'sig1': sig1, 'pos2': pos2, 'sig2': sig2,
+                            'tipo': 'planeta-planeta',
+                        })
+
+        # Aspectos entre planetas e pontos fixos
+        for p1_nome in PLANETAS.keys():
+            p1 = self.planetas[p1_nome]
+            for pf_nome in ['ASC', 'MC', 'FOR']:
+                if pf_nome in self.pontos_fixos:
+                    pf = self.pontos_fixos[pf_nome]
+                    dif = angular_difference(p1.lon, pf.lon)
+                    for cod, (alvo, orbe) in ASPECTOS.items():
+                        gap = abs(dif - alvo)
+                        if gap <= orbe:
+                            sig1, pos1 = graus_para_signo_posicao(p1.lon)
+                            self.aspectos_natais.append({
+                                'p1': p1_nome, 'p2': pf_nome, 'cod': cod, 'orbe': gap,
+                                'pos1': pos1, 'sig1': sig1, 'pos2': pf.pos_str, 'sig2': pf.signo,
+                                'tipo': 'planeta-ponto',
+                            })
+
+        # Aspectos entre pontos fixos
+        pontos_nomes = ['ASC', 'MC', 'FOR']
+        for i, pf1_nome in enumerate(pontos_nomes):
+            if pf1_nome not in self.pontos_fixos:
+                continue
+            pf1 = self.pontos_fixos[pf1_nome]
+            for pf2_nome in pontos_nomes[i + 1:]:
+                if pf2_nome not in self.pontos_fixos:
+                    continue
+                pf2 = self.pontos_fixos[pf2_nome]
+                dif = angular_difference(pf1.lon, pf2.lon)
+                for cod, (alvo, orbe) in ASPECTOS.items():
+                    gap = abs(dif - alvo)
+                    if gap <= orbe:
+                        self.aspectos_natais.append({
+                            'p1': pf1_nome, 'p2': pf2_nome, 'cod': cod, 'orbe': gap,
+                            'pos1': pf1.pos_str, 'sig1': pf1.signo, 'pos2': pf2.pos_str, 'sig2': pf2.signo,
+                            'tipo': 'ponto-ponto',
                         })
 
     def _deduplicate_transitos(self, janela_tempo: float = 0.15) -> None:
@@ -578,7 +618,8 @@ class MapaAstral:
         rel.append(f"ASPECTOS ({len(self.aspectos_natais)}):")
         rel.append("-" * 100)
         for asp in sorted(self.aspectos_natais, key=lambda x: x['orbe']):
-            linha = f"{asp['p1']:3s} [{asp['pos1']} {asp['sig1']}] {asp['cod']} {asp['p2']:3s} [{asp['pos2']} {asp['sig2']}] - Orbe: {asp['orbe']:.2f}"
+            tipo = asp.get('tipo', '').replace('planeta-', 'P-').replace('ponto-', 'PT-')
+            linha = f"{asp['p1']:3s} [{asp['pos1']} {asp['sig1']}] {asp['cod']} {asp['p2']:3s} [{asp['pos2']} {asp['sig2']}] - Orbe: {asp['orbe']:.2f} [{tipo}]"
             rel.append(linha)
 
         rel.append("")
