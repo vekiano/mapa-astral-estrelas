@@ -25,6 +25,7 @@ PLANETAS = {
     'NET': swe.NEPTUNE, 'PLU': swe.PLUTO, 'TNN': swe.TRUE_NODE,
 }
 PLANETA_REV = {v: k for k, v in PLANETAS.items()}
+PLANETAS_MOVEIS = [swe.MOON, swe.MERCURY, swe.VENUS, swe.MARS]
 
 
 @dataclass
@@ -34,6 +35,15 @@ class Corpo:
     lat: float
     vel: float
     mov: str
+    signo: str
+    pos_str: str
+    tipo: str = 'planeta'
+
+
+@dataclass
+class PontoFixo:
+    nome: str
+    lon: float
     signo: str
     pos_str: str
 
@@ -48,6 +58,7 @@ class Transito:
     pos_planeta2: float
     orbe: float
     tipo: str
+    planeta2_nome: str = ''
 
 
 @dataclass
@@ -115,17 +126,12 @@ def calcular_declinacao_planeta(jd: float, planeta: int) -> float:
 
 def determinar_intervalo(planeta1: int, planeta2: int) -> float:
     planeta_lento = max(planeta1, planeta2)
-    # intervalos = {
-    #     swe.MOON: 0.01, swe.MERCURY: 0.05, swe.VENUS: 0.05, swe.SUN: 0.05,
-    #     swe.MARS: 0.1, swe.JUPITER: 0.2, swe.SATURN: 0.5, swe.URANUS: 1.0,
-    #     swe.NEPTUNE: 1.0, swe.PLUTO: 1.0, swe.TRUE_NODE: 0.5,
-    # }
     intervalos = {
         swe.MOON: 0.005,
         swe.MERCURY: 0.02,
         swe.VENUS: 0.02,
         swe.SUN: 0.05,
-        swe.MARS: 0.05,  # aumentar precisão
+        swe.MARS: 0.05,
         swe.JUPITER: 0.1,
         swe.SATURN: 0.2,
         swe.URANUS: 0.5,
@@ -137,7 +143,7 @@ def determinar_intervalo(planeta1: int, planeta2: int) -> float:
 
 
 def buscar_transito_exato(jd_inicio: float, jd_fim: float, planeta1: int, planeta2: int,
-                          angulo_aspecto: float, orbe: float) -> Tuple[float, float]:
+                          angulo_aspecto: float, orbe: float, eh_ponto_fixo: bool = False) -> Tuple[float, float]:
     NUM_SAMPLES = 24
     BISSECCOES_MAX = 10
     DELTA_MIN = 1.0e-10
@@ -145,7 +151,10 @@ def buscar_transito_exato(jd_inicio: float, jd_fim: float, planeta1: int, planet
 
     def calcular_orbe_atual(jd: float) -> float:
         p1 = calcular_posicao_planeta(jd, planeta1)
-        p2 = calcular_posicao_planeta(jd, planeta2)
+        if eh_ponto_fixo:
+            p2 = planeta2
+        else:
+            p2 = calcular_posicao_planeta(jd, planeta2)
         diff = angular_difference(p1, p2)
         return diff - angulo_aspecto
 
@@ -221,7 +230,8 @@ def buscar_mudanca_signo_exata(jd1: float, jd2: float, planeta: int, signo_saida
 
 class MapaAstral:
     def __init__(self, nome_mapa, dia, mes, ano, hora, minuto, segundo,
-                 latitude_dec, longitude_dec, timezone_horas, cidade='', estado='', pais='', house_system_label='Regiomontanus'):
+                 latitude_dec, longitude_dec, timezone_horas, cidade='', estado='', pais='',
+                 house_system_label='Regiomontanus'):
         self.nome_mapa = nome_mapa.strip()
         self.dia, self.mes, self.ano = dia, mes, ano
         self.hora, self.minuto, self.segundo = hora, minuto, segundo
@@ -235,6 +245,7 @@ class MapaAstral:
         self.jd = dt_to_jd_utc(self.dt_utc)
 
         self.planetas = {}
+        self.pontos_fixos = {}
         self.casas = {}
         self.aspectos_natais = []
         self.transitos = []
@@ -244,6 +255,27 @@ class MapaAstral:
 
         swe.set_ephe_path(None)
 
+    def calcular_pontos_fixos(self):
+        self.pontos_fixos.clear()
+
+        casas, _ = swe.houses(self.jd, self.latitude, self.longitude, b'R')
+
+        asc_lon = float(casas[0])
+        mc_lon = float(casas[9])
+
+        sol_lon = calcular_posicao_planeta(self.jd, swe.SUN)
+        lua_lon = calcular_posicao_planeta(self.jd, swe.MOON)
+
+        fortuna_lon = (asc_lon + lua_lon - sol_lon) % 360.0
+
+        asc_sig, asc_pos = graus_para_signo_posicao(asc_lon)
+        mc_sig, mc_pos = graus_para_signo_posicao(mc_lon)
+        for_sig, for_pos = graus_para_signo_posicao(fortuna_lon)
+
+        self.pontos_fixos['ASC'] = PontoFixo('ASC', asc_lon, asc_sig, asc_pos)
+        self.pontos_fixos['MC'] = PontoFixo('MC', mc_lon, mc_sig, mc_pos)
+        self.pontos_fixos['FOR'] = PontoFixo('FOR', fortuna_lon, for_sig, for_pos)
+
     def calcular_planetas(self):
         self.planetas.clear()
         for nome, code in PLANETAS.items():
@@ -251,7 +283,7 @@ class MapaAstral:
             lon, lat, lon_speed = float(pos[0]), float(pos[1]), float(pos[3])
             mov = 'dir' if lon_speed >= 0 else 'ret'
             signo, pos_str = graus_para_signo_posicao(lon)
-            self.planetas[nome] = Corpo(nome, lon, lat, lon_speed, mov, signo, pos_str)
+            self.planetas[nome] = Corpo(nome, lon, lat, lon_speed, mov, signo, pos_str, 'planeta')
 
     def calcular_casas(self):
         self.casas.clear()
@@ -332,6 +364,7 @@ class MapaAstral:
         jd_fim = dt_to_jd_utc(dt_fim)
 
         planetas_list = list(PLANETAS.keys())
+
         for i, p1_nome in enumerate(planetas_list):
             for p2_nome in planetas_list[i + 1:]:
                 p1, p2 = PLANETAS[p1_nome], PLANETAS[p2_nome]
@@ -355,13 +388,48 @@ class MapaAstral:
                         gap_prox = abs(diff_prox - aspecto_deg)
 
                         if min(gap_atual, gap_prox) <= orbe:
-                            jd_exato, orbe_final = buscar_transito_exato(jd_atual, jd_prox, p1, p2, aspecto_deg, orbe)
+                            jd_exato, orbe_final = buscar_transito_exato(jd_atual, jd_prox, p1, p2, aspecto_deg, orbe,
+                                                                         False)
 
                             if jd_exato > 0 and jd_inicio <= jd_exato <= jd_fim and orbe_final < 0.005:
                                 pos1_ex = calcular_posicao_planeta(jd_exato, p1)
                                 pos2_ex = calcular_posicao_planeta(jd_exato, p2)
 
-                                trans = Transito(jd_exato, p1, p2, aspecto_deg, pos1_ex, pos2_ex, orbe_final, 'aspecto')
+                                trans = Transito(jd_exato, p1, p2, aspecto_deg, pos1_ex, pos2_ex, orbe_final, 'aspecto',
+                                                 p2_nome)
+                                self.transitos.append(trans)
+
+                        jd_atual = jd_prox
+
+        for ponto_nome, ponto_obj in self.pontos_fixos.items():
+            for planeta_nome in [nome for nome, code in PLANETAS.items() if code in PLANETAS_MOVEIS]:
+                planeta_code = PLANETAS[planeta_nome]
+
+                for aspecto_deg, orbe in ORBES_PADRAO.items():
+                    intervalo = determinar_intervalo(planeta_code, planeta_code)
+                    jd_atual = jd_inicio
+
+                    while jd_atual < jd_fim:
+                        jd_prox = min(jd_atual + intervalo, jd_fim)
+
+                        pos1 = calcular_posicao_planeta(jd_atual, planeta_code)
+                        diff_atual = angular_difference(pos1, ponto_obj.lon)
+
+                        pos1_prox = calcular_posicao_planeta(jd_prox, planeta_code)
+                        diff_prox = angular_difference(pos1_prox, ponto_obj.lon)
+
+                        gap_atual = abs(diff_atual - aspecto_deg)
+                        gap_prox = abs(diff_prox - aspecto_deg)
+
+                        if min(gap_atual, gap_prox) <= orbe:
+                            jd_exato, orbe_final = buscar_transito_exato(jd_atual, jd_prox, planeta_code, ponto_obj.lon,
+                                                                         aspecto_deg, orbe, True)
+
+                            if jd_exato > 0 and jd_inicio <= jd_exato <= jd_fim and orbe_final < 0.005:
+                                pos1_ex = calcular_posicao_planeta(jd_exato, planeta_code)
+
+                                trans = Transito(jd_exato, planeta_code, -1, aspecto_deg, pos1_ex, ponto_obj.lon,
+                                                 orbe_final, 'aspecto', ponto_nome)
                                 self.transitos.append(trans)
 
                         jd_atual = jd_prox
@@ -434,7 +502,8 @@ class MapaAstral:
 
         for trans in self.transitos:
             p1_nome = PLANETA_REV.get(trans.planeta1, f'PL{trans.planeta1}')
-            p2_nome = PLANETA_REV.get(trans.planeta2, f'PL{trans.planeta2}')
+            p2_nome = trans.planeta2_nome if trans.planeta2_nome else PLANETA_REV.get(trans.planeta2,
+                                                                                      f'PL{trans.planeta2}')
 
             sig1, pos1 = graus_para_signo_posicao(trans.pos_planeta1)
             sig2, pos2 = graus_para_signo_posicao(trans.pos_planeta2)
@@ -461,6 +530,7 @@ class MapaAstral:
         self.eventos_astral.sort()
 
     def gerar_relatorio(self):
+        self.calcular_pontos_fixos()
         self.calcular_planetas()
         self.calcular_casas()
         self.calcular_aspectos()
@@ -473,7 +543,8 @@ class MapaAstral:
         rel.append("=" * 100)
         rel.append(self.nome_mapa or "MAPA ASTRAL COMPLETO")
         rel.append("=" * 100)
-        rel.append(f"Data: {self.dia:02d}/{self.mes:02d}/{self.ano}  Hora: {self.hora:02d}:{self.minuto:02d}:{self.segundo:02d} (UTC {self.timezone_horas:+.1f}h)")
+        rel.append(
+            f"Data: {self.dia:02d}/{self.mes:02d}/{self.ano}  Hora: {self.hora:02d}:{self.minuto:02d}:{self.segundo:02d} (UTC {self.timezone_horas:+.1f}h)")
         if self.cidade or self.estado or self.pais:
             rel.append(f"Local: {self.cidade} / {self.estado} / {self.pais}")
         rel.append(f"Lat: {self.latitude:.6f}  Lon: {self.longitude:.6f}")
@@ -487,6 +558,14 @@ class MapaAstral:
                 c = self.planetas[nome]
                 mov = c.mov.upper()
                 rel.append(f"{nome:3s} [{c.pos_str} {c.signo}] {mov}")
+
+        rel.append("")
+        rel.append("PONTOS FIXOS:")
+        rel.append("-" * 100)
+        for nome in ['ASC', 'MC', 'FOR']:
+            if nome in self.pontos_fixos:
+                p = self.pontos_fixos[nome]
+                rel.append(f"{nome:3s} [{p.pos_str} {p.signo}]")
 
         rel.append("")
         rel.append(f"CASAS TERRESTRES por {self.house_system_label}")
@@ -542,9 +621,8 @@ class MapaAstral:
 @app.route('/')
 def index():
     now = datetime.utcnow()
-    timezone_padrao = -3  # Brasília
+    timezone_padrao = -3
     hora_ajustada = (now.hour + timezone_padrao + 24) % 24
-    # hora_ajustada = (now.hour - 3) % 24
     html = '''<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -662,6 +740,8 @@ function copiarResultado() {
 }
 
 function abrirBusca() {
+  let cidadeAtual = document.getElementById('cidade').value;
+  document.getElementById('search').value = cidadeAtual;
   document.getElementById('modal').style.display = 'flex';
   document.getElementById('search').focus();
 }
@@ -669,22 +749,17 @@ function abrirBusca() {
 function atualizarHoraParaTimeZone() {
   let tz = parseFloat(document.getElementById('tz').value);
   let now = new Date();
-  
-  // Pega a hora UTC do sistema (sempre consistente)
+
   let hora_utc = now.getUTCHours();
   let minuto_utc = now.getUTCMinutes();
   let segundo_utc = now.getUTCSeconds();
-  
-  // Converte para hora local do timezone selecionado
+
   let nova_hora = (hora_utc + tz + 24) % 24;
-  
-  // Atualiza os campos
+
   document.getElementById('hora').value = Math.floor(nova_hora);
   document.getElementById('minuto').value = minuto_utc;
   document.getElementById('segundo').value = segundo_utc;
 }
-
-// NO EVENTO DE BUSCA DE CIDADE, ALTERE ISTO:
 
 document.getElementById('search').addEventListener('input', async function(e) {
   let q = e.target.value;
