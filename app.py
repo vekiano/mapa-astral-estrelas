@@ -71,6 +71,22 @@ class EventoAstral:
         return self.jd_exato < other.jd_exato
 
 
+# =============================================
+# NOVO: helper p/ imprimir a sigla do tipo de aspecto
+# =============================================
+PONTOS_FIXOS_NOMES = {'ASC', 'MC', 'FOR'}
+
+def sigla_tipo_aspecto(nome1: str, nome2: str) -> str:
+    """Retorna [P-P], [P-PT] ou [PT-PT] conforme os dois envolvidos."""
+    e1_pt = nome1 in PONTOS_FIXOS_NOMES
+    e2_pt = nome2 in PONTOS_FIXOS_NOMES
+    if e1_pt and e2_pt:
+        return "[PT-PT]"
+    if e1_pt or e2_pt:
+        return "[P-PT]"
+    return "[P-P]"
+
+
 def graus_para_dms(graus):
     graus = graus % 360.0
     g = int(graus)
@@ -311,7 +327,7 @@ class MapaAstral:
                         self.aspectos_natais.append({
                             'p1': p1_nome, 'p2': p2_nome, 'cod': cod, 'orbe': gap,
                             'pos1': pos1, 'sig1': sig1, 'pos2': pos2, 'sig2': sig2,
-                            'tipo': 'planeta-planeta',
+                            'tipo_sigla': sigla_tipo_aspecto(p1_nome, p2_nome),
                         })
 
         # Aspectos entre planetas e pontos fixos
@@ -328,7 +344,7 @@ class MapaAstral:
                             self.aspectos_natais.append({
                                 'p1': p1_nome, 'p2': pf_nome, 'cod': cod, 'orbe': gap,
                                 'pos1': pos1, 'sig1': sig1, 'pos2': pf.pos_str, 'sig2': pf.signo,
-                                'tipo': 'planeta-ponto',
+                                'tipo_sigla': sigla_tipo_aspecto(p1_nome, pf_nome),
                             })
 
         # Aspectos entre pontos fixos
@@ -348,7 +364,7 @@ class MapaAstral:
                         self.aspectos_natais.append({
                             'p1': pf1_nome, 'p2': pf2_nome, 'cod': cod, 'orbe': gap,
                             'pos1': pf1.pos_str, 'sig1': pf1.signo, 'pos2': pf2.pos_str, 'sig2': pf2.signo,
-                            'tipo': 'ponto-ponto',
+                            'tipo_sigla': sigla_tipo_aspecto(pf1_nome, pf2_nome),
                         })
 
     def _deduplicate_transitos(self, janela_tempo: float = 0.15) -> None:
@@ -555,7 +571,10 @@ class MapaAstral:
                     break
             asp_cod = asp_cod or '???'
 
-            descricao = f"[{p1_nome} {asp_cod} {p2_nome}] - {pos1} {sig1} / {pos2} {sig2} - {trans.orbe:.5f}"
+            # NOVO: incluir sigla do tipo nos trânsitos
+            tipo_sigla = "[P-PT]" if trans.planeta2 == -1 else "[P-P]"
+            descricao = (f"{tipo_sigla} [{p1_nome} {asp_cod} {p2_nome}] - "
+                         f"{pos1} {sig1} / {pos2} {sig2} - {trans.orbe:.5f}")
             evento = EventoAstral(trans.jd_exato, 'aspecto', descricao)
             self.eventos_astral.append(evento)
 
@@ -618,8 +637,10 @@ class MapaAstral:
         rel.append(f"ASPECTOS ({len(self.aspectos_natais)}):")
         rel.append("-" * 100)
         for asp in sorted(self.aspectos_natais, key=lambda x: x['orbe']):
-            tipo = asp.get('tipo', '').replace('planeta-', 'P-').replace('ponto-', 'PT-')
-            linha = f"{asp['p1']:3s} [{asp['pos1']} {asp['sig1']}] {asp['cod']} {asp['p2']:3s} [{asp['pos2']} {asp['sig2']}] - Orbe: {asp['orbe']:.2f} [{tipo}]"
+            tipo_sigla = asp.get('tipo_sigla', sigla_tipo_aspecto(asp['p1'], asp['p2']))
+            linha = (f"{asp['p1']:3s} [{asp['pos1']} {asp['sig1']}] {asp['cod']} "
+                     f"{asp['p2']:3s} [{asp['pos2']} {asp['sig2']}] - Orbe: {asp['orbe']:.2f} "
+                     f"{tipo_sigla}")
             rel.append(linha)
 
         rel.append("")
