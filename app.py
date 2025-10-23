@@ -386,13 +386,13 @@ class MapaAstral:
         self.dia, self.mes, self.ano = dia, mes, ano
         self.hora, self.minuto, self.segundo = hora, minuto, segundo
         self.latitude, self.longitude = latitude_dec, longitude_dec
-        self.timezone_horas = timezone_horas
+        self.timezone_horas = float(timezone_horas)  # CORRIGIDO: converter para float
         self.cidade, self.estado, self.pais = cidade, estado, pais
         self.house_system_label = house_system_label
         self.estrelas_orbe_graus = float(estrelas_orbe_graus)
 
         self.dt_local = datetime(ano, mes, dia, hora, minuto, segundo)
-        self.dt_utc = self.dt_local - timedelta(hours=timezone_horas)
+        self.dt_utc = self.dt_local - timedelta(hours=self.timezone_horas)
         self.jd = dt_to_jd_utc(self.dt_utc)
 
         self.planetas: Dict[str, Corpo] = {}
