@@ -1,22 +1,17 @@
 # -*- coding: utf-8 -*-
 import os
 from datetime import datetime, timedelta
-from typing import Tuple, List, Dict
+from typing import Tuple, List, Dict, Optional
 from dataclasses import dataclass
 from flask import Flask, request, jsonify
 
 try:
     import swisseph as swe
-except Exception:
-    # O app espera ter o Swiss Ephemeris instalado em runtime
-    # mas não quebramos a importação aqui para permitir lint/teste do restante
-    pass
+except Exception as e:
+    raise RuntimeError("Swiss Ephemeris (swisseph) é obrigatório para esta aplicação.")
 
 app = Flask(__name__)
 
-# ==========================
-# TABELAS E CONSTANTES
-# ==========================
 ASPECTOS = {
     'CJN': (0.0, 8.0), 'OPO': (180.0, 8.0), 'TRI': (120.0, 8.0),
     'SQR': (90.0, 6.0), 'SXT': (60.0, 6.0), 'QCX': (150.0, 3.0),
@@ -24,7 +19,6 @@ ASPECTOS = {
 }
 ORBES_PADRAO = {0.0: 8.0, 45.0: 2.0, 60.0: 6.0, 90.0: 6.0, 120.0: 8.0, 135.0: 2.0, 150.0: 3.0, 180.0: 8.0}
 SIGNOS = ['AR', 'TA', 'GE', 'CA', 'LE', 'VI', 'LI', 'SC', 'SG', 'CP', 'AQ', 'PI']
-
 PLANETAS = {
     'SOL': swe.SUN, 'LUA': swe.MOON, 'MER': swe.MERCURY, 'VEN': swe.VENUS,
     'MAR': swe.MARS, 'JUP': swe.JUPITER, 'SAT': swe.SATURN, 'URA': swe.URANUS,
@@ -33,73 +27,17 @@ PLANETAS = {
 PLANETA_REV = {v: k for k, v in PLANETAS.items()}
 PLANETAS_MOVEIS = [swe.MOON, swe.MERCURY, swe.VENUS, swe.MARS]
 
-# Estrelas fixas (config)
-STAR_DEFAULT_ORB = 0.10  # graus, ± orbe
-STAR_LIST_FILENAME = 'Estrelas_Fixas.txt'  # arquivo TAB (fornecido pelo usuário)
-STAR_LIST_LIMIT = 500  # limite de linhas a ler
+# --------------------------- Utilitários básicos --------------------------- #
 
-# Para detectar tipo P/PT na listagem de aspectos natais
-PONTOS_FIXOS_NOMES = {'ASC', 'MC', 'FOR'}
+def normalize_angle(x: float) -> float:
+    x = x % 360.0
+    return x if x >= 0 else x + 360.0
 
 
-# ==========================
-# DATACLASSES
-# ==========================
-@dataclass
-class Corpo:
-    nome: str
-    lon: float
-    lat: float
-    vel: float
-    mov: str
-    signo: str
-    pos_str: str
-    tipo: str = 'planeta'
-
-
-@dataclass
-class PontoFixo:
-    nome: str
-    lon: float
-    signo: str
-    pos_str: str
-
-
-@dataclass
-class Transito:
-    jd_exato: float
-    planeta1: int
-    planeta2: int
-    aspecto: float
-    pos_planeta1: float
-    pos_planeta2: float
-    orbe: float
-    tipo: str
-    planeta2_nome: str = ''
-
-
-@dataclass
-class EventoAstral:
-    jd_exato: float
-    tipo: str
-    descricao: str
-
-    def __lt__(self, other):
-        return self.jd_exato < other.jd_exato
-
-
-# ==========================
-# HELPERS GERAIS
-# ==========================
-
-def sigla_tipo_aspecto(nome1: str, nome2: str) -> str:
-    e1_pt = nome1 in PONTOS_FIXOS_NOMES
-    e2_pt = nome2 in PONTOS_FIXOS_NOMES
-    if e1_pt and e2_pt:
-        return "[PT-PT]"
-    if e1_pt or e2_pt:
-        return "[P-PT]"
-    return "[P-P]"
+def angular_difference(a: float, b: float) -> float:
+    """Diferença angular mínima em graus (0..180)."""
+    d = abs((a % 360.0) - (b % 360.0))
+    return d if d <= 180.0 else 360.0 - d
 
 
 def graus_para_dms(graus):
@@ -115,11 +53,6 @@ def graus_para_signo_posicao(graus):
     idx = int(graus / 30.0)
     pos_no_signo = graus % 30.0
     return SIGNOS[idx], graus_para_dms(pos_no_signo)
-
-
-def angular_difference(a, b):
-    d = abs((a % 360.0) - (b % 360.0))
-    return d if d <= 180.0 else 360.0 - d
 
 
 def dt_to_jd_utc(dt_utc):
@@ -172,6 +105,52 @@ def determinar_intervalo(planeta1: int, planeta2: int) -> float:
     }
     return intervalos.get(planeta_lento, 0.5)
 
+# --------------------------- Dataclasses --------------------------- #
+
+@dataclass
+class Corpo:
+    nome: str
+    lon: float
+    lat: float
+    vel: float
+    mov: str
+    signo: str
+    pos_str: str
+    tipo: str = 'planeta'
+
+
+@dataclass
+class PontoFixo:
+    nome: str
+    lon: float
+    signo: str
+    pos_str: str
+
+
+@dataclass
+class Transito:
+    jd_exato: float
+    planeta1: int
+    planeta2: int
+    aspecto: float
+    pos_planeta1: float
+    pos_planeta2: float
+    orbe: float
+    tipo: str
+    planeta2_nome: str = ''
+
+
+@dataclass
+class EventoAstral:
+    jd_exato: float
+    tipo: str
+    descricao: str
+
+    def __lt__(self, other):
+        return self.jd_exato < other.jd_exato
+
+
+# --------------------------- Núcleo de busca de trânsitos --------------------------- #
 
 def buscar_transito_exato(jd_inicio: float, jd_fim: float, planeta1: int, planeta2: int,
                           angulo_aspecto: float, orbe: float, eh_ponto_fixo: bool = False) -> Tuple[float, float]:
@@ -181,17 +160,14 @@ def buscar_transito_exato(jd_inicio: float, jd_fim: float, planeta1: int, planet
 
     def calcular_orbe_atual(jd: float) -> float:
         p1 = calcular_posicao_planeta(jd, planeta1)
-        if eh_ponto_fixo:
-            p2 = planeta2
-        else:
-            p2 = calcular_posicao_planeta(jd, planeta2)
+        p2 = planeta2 if eh_ponto_fixo else calcular_posicao_planeta(jd, planeta2)
         diff = angular_difference(p1, p2)
         return diff - angulo_aspecto
 
     delta_tempo = (jd_fim - jd_inicio) / (NUM_SAMPLES - 1)
     amostras = []
-    melhor_orbe = 999
-    melhor_jd = 0
+    melhor_orbe = 999.0
+    melhor_jd = 0.0
 
     for i in range(NUM_SAMPLES):
         jd_sample = jd_inicio + i * delta_tempo
@@ -202,15 +178,16 @@ def buscar_transito_exato(jd_inicio: float, jd_fim: float, planeta1: int, planet
             melhor_jd = jd_sample
 
     if melhor_orbe > ORBE_LIMITE:
-        return 0, 999
+        return 0.0, 999.0
 
-    jd1, jd2 = 0, 0
+    # Estreita ao redor do mínimo local
+    jd1, jd2 = 0.0, 0.0
     for i in range(1, NUM_SAMPLES - 1):
         if amostras[i - 1][1] > amostras[i][1] < amostras[i + 1][1]:
             jd1, jd2 = amostras[i - 1][0], amostras[i + 1][0]
             break
 
-    if jd1 == 0:
+    if jd1 == 0.0:
         idx = [i for i, (jd, _) in enumerate(amostras) if jd == melhor_jd][0]
         idx1 = max(0, idx - 1)
         idx2 = min(NUM_SAMPLES - 1, idx + 1)
@@ -232,7 +209,7 @@ def buscar_transito_exato(jd_inicio: float, jd_fim: float, planeta1: int, planet
         else:
             jd1 = jd_meio
 
-    return melhor_jd, melhor_orbe if melhor_orbe <= orbe else (0, 999)
+    return (melhor_jd, melhor_orbe) if melhor_orbe <= orbe else (0.0, 999.0)
 
 
 def buscar_mudanca_signo_exata(jd1: float, jd2: float, planeta: int, signo_saida: int) -> float:
@@ -245,65 +222,73 @@ def buscar_mudanca_signo_exata(jd1: float, jd2: float, planeta: int, signo_saida
     for _ in range(BISSECCOES_MAX):
         jd_meio = (jd1 + jd2) / 2
         sig_meio = signo_atual(jd_meio)
-
         if sig_meio == signo_saida:
             jd1 = jd_meio
         else:
             jd2 = jd_meio
-
         if abs(jd2 - jd1) < 1.0e-12:
             return jd_meio
-
     return (jd1 + jd2) / 2
 
+# --------------------------- Estrelas Fixas --------------------------- #
 
-# ==========================
-# ESTRELAS FIXAS – LEITURA E CÁLCULO
-# ==========================
+@dataclass
+class EstrelaFixa:
+    nome: str
+    constelacao: str
+    lon: Optional[float]  # pode vir do arquivo; se None, usa Swiss Ephemeris pelo nome
 
-def carregar_estrelas_tab(caminho: str, limite: int = STAR_LIST_LIMIT) -> List[Dict[str, str]]:
+
+def ler_estrelas_arquivo(caminho: str) -> List[EstrelaFixa]:
+    """Lê arquivo TAB. Aceita 2 formatos:
+    1) Nome	Constelação	... (sem longitude) -> lon=None e será resolvida via swe.fixstar2
+    2) Nome	Constelação	Longitude (graus decimais) -> usa valor
+    Demais colunas são ignoradas.
     """
-    Lê arquivo TAB "Estrelas_Fixas.txt" com cabeçalho:
-    Nome \t Constelação \t Área de Influência \t Interpretação
-    Retorna lista de dicts com ao menos {nome, constelacao}.
-    """
-    estrelas = []
+    estrelas: List[EstrelaFixa] = []
     if not os.path.exists(caminho):
         return estrelas
     with open(caminho, 'r', encoding='utf-8', errors='ignore') as f:
-        linhas = f.readlines()
-    if not linhas:
-        return estrelas
-    # pular linha de cabeçalho se houver
-    start = 1 if 'Nome' in linhas[0] and '\t' in linhas[0] else 0
-    for linha in linhas[start:]:
-        s = linha.strip()
-        if not s:
-            continue
-        cols = s.split('\t')
-        if len(cols) >= 2:
-            nome = cols[0].strip()
-            const = cols[1].strip()
-            if nome:
-                estrelas.append({'nome': nome, 'constelacao': const})
-                if len(estrelas) >= limite:
-                    break
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            parts = line.split('	')
+            if len(parts) < 2:
+                continue
+            nome = parts[0].strip()
+            const = parts[1].strip()
+            lon: Optional[float] = None
+            # tenta 3ª coluna como longitude (opcional)
+            if len(parts) >= 3:
+                try:
+                    test = parts[2].replace(',', '.')
+                    lon_val = float(test)
+                    lon = normalize_angle(lon_val)
+                except Exception:
+                    lon = None
+            estrelas.append(EstrelaFixa(nome=nome, constelacao=const, lon=lon))
     return estrelas
 
 
-def star_longitude(jd_ut: float, star_name: str) -> float:
-    """Longitude eclíptica (0..360) da estrela para jd_ut (UT)."""
-    pos, _ = swe.fixstar_ut(star_name, jd_ut)
-    return float(pos[0]) % 360.0
+def longitude_estrela_por_nome(jd_ut: float, nome: str) -> Optional[float]:
+    """Tenta obter a longitude eclíptica (equinócio da data) via Swiss Ephemeris pelo nome da estrela."""
+    try:
+        # swe.fixstar2 retorna [lon, lat, dist, ra, dec, ...] em eclíptica/equinócio da data por padrão
+        # Documentação: longitude eclíptica aparente (true) – ideal para conjunções e oposições por longitude
+        pos, _ = swe.fixstar2(nome)
+        lon = float(pos[0]) % 360.0
+        return lon
+    except Exception:
+        return None
 
 
-# ==========================
-# CLASSE PRINCIPAL
-# ==========================
+# --------------------------- Classe principal --------------------------- #
+
 class MapaAstral:
     def __init__(self, nome_mapa, dia, mes, ano, hora, minuto, segundo,
                  latitude_dec, longitude_dec, timezone_horas, cidade='', estado='', pais='',
-                 house_system_label='Regiomontanus', star_orb_deg: float = STAR_DEFAULT_ORB):
+                 house_system_label='Regiomontanus', estrelas_orbe_graus: float = 0.10):
         self.nome_mapa = nome_mapa.strip()
         self.dia, self.mes, self.ano = dia, mes, ano
         self.hora, self.minuto, self.segundo = hora, minuto, segundo
@@ -311,7 +296,7 @@ class MapaAstral:
         self.timezone_horas = timezone_horas
         self.cidade, self.estado, self.pais = cidade, estado, pais
         self.house_system_label = house_system_label
-        self.star_orb_deg = float(star_orb_deg) if star_orb_deg is not None else STAR_DEFAULT_ORB
+        self.estrelas_orbe_graus = float(estrelas_orbe_graus)
 
         self.dt_local = datetime(ano, mes, dia, hora, minuto, segundo)
         self.dt_utc = self.dt_local - timedelta(hours=timezone_horas)
@@ -319,16 +304,18 @@ class MapaAstral:
 
         self.planetas: Dict[str, Corpo] = {}
         self.pontos_fixos: Dict[str, PontoFixo] = {}
-        self.casas: Dict[int, Dict[str, str]] = {}
+        self.casas = {}
         self.aspectos_natais = []
         self.transitos: List[Transito] = []
         self.mudancas_signo: List[EventoAstral] = []
         self.voc_periodos: List[Dict] = []
         self.eventos_astral: List[EventoAstral] = []
+        self.estrelas_lista: List[EstrelaFixa] = []
+        self.estrelas_hits: List[Dict] = []
 
         swe.set_ephe_path(None)
 
-    # ------------- pontos, planetas, casas, aspectos -------------
+    # --------- cálculos básicos do mapa --------- #
     def calcular_pontos_fixos(self):
         self.pontos_fixos.clear()
         casas, _ = swe.houses(self.jd, self.latitude, self.longitude, b'R')
@@ -351,7 +338,7 @@ class MapaAstral:
             lon, lat, lon_speed = float(pos[0]), float(pos[1]), float(pos[3])
             mov = 'dir' if lon_speed >= 0 else 'ret'
             signo, pos_str = graus_para_signo_posicao(lon)
-            self.planetas[nome] = Corpo(nome, lon, lat, lon_speed, mov, signo, pos_str, 'planeta')
+            self.planetas[nome] = Corpo(nome, lon % 360.0, lat, lon_speed, mov, signo, pos_str, 'planeta')
 
     def calcular_casas(self):
         self.casas.clear()
@@ -361,10 +348,10 @@ class MapaAstral:
             s, p = graus_para_signo_posicao(lon)
             self.casas[i + 1] = {'longitude': lon, 'signo': s, 'posicao': p}
 
+    # --------- aspectos natais (entre corpos/pontos) --------- #
     def calcular_aspectos(self):
         self.aspectos_natais.clear()
         nomes = list(PLANETAS.keys())
-        # Planeta-Planeta
         for i, p1_nome in enumerate(nomes):
             for p2_nome in nomes[i + 1:]:
                 p1 = self.planetas[p1_nome]
@@ -378,26 +365,25 @@ class MapaAstral:
                         self.aspectos_natais.append({
                             'p1': p1_nome, 'p2': p2_nome, 'cod': cod, 'orbe': gap,
                             'pos1': pos1, 'sig1': sig1, 'pos2': pos2, 'sig2': sig2,
-                            'tipo_sigla': sigla_tipo_aspecto(p1_nome, p2_nome),
+                            'tipo': 'planeta-planeta',
                         })
-        # Planeta-Ponto Fixo
+        # Planeta x pontos
         for p1_nome in PLANETAS.keys():
             p1 = self.planetas[p1_nome]
             for pf_nome in ['ASC', 'MC', 'FOR']:
-                if pf_nome not in self.pontos_fixos:
-                    continue
-                pf = self.pontos_fixos[pf_nome]
-                dif = angular_difference(p1.lon, pf.lon)
-                for cod, (alvo, orbe) in ASPECTOS.items():
-                    gap = abs(dif - alvo)
-                    if gap <= orbe:
-                        sig1, pos1 = graus_para_signo_posicao(p1.lon)
-                        self.aspectos_natais.append({
-                            'p1': p1_nome, 'p2': pf_nome, 'cod': cod, 'orbe': gap,
-                            'pos1': pos1, 'sig1': sig1, 'pos2': pf.pos_str, 'sig2': pf.signo,
-                            'tipo_sigla': sigla_tipo_aspecto(p1_nome, pf_nome),
-                        })
-        # Ponto Fixo - Ponto Fixo
+                if pf_nome in self.pontos_fixos:
+                    pf = self.pontos_fixos[pf_nome]
+                    dif = angular_difference(p1.lon, pf.lon)
+                    for cod, (alvo, orbe) in ASPECTOS.items():
+                        gap = abs(dif - alvo)
+                        if gap <= orbe:
+                            sig1, pos1 = graus_para_signo_posicao(p1.lon)
+                            self.aspectos_natais.append({
+                                'p1': p1_nome, 'p2': pf_nome, 'cod': cod, 'orbe': gap,
+                                'pos1': pos1, 'sig1': sig1, 'pos2': pf.pos_str, 'sig2': pf.signo,
+                                'tipo': 'planeta-ponto',
+                            })
+        # Ponto x Ponto
         pontos_nomes = ['ASC', 'MC', 'FOR']
         for i, pf1_nome in enumerate(pontos_nomes):
             if pf1_nome not in self.pontos_fixos:
@@ -414,10 +400,10 @@ class MapaAstral:
                         self.aspectos_natais.append({
                             'p1': pf1_nome, 'p2': pf2_nome, 'cod': cod, 'orbe': gap,
                             'pos1': pf1.pos_str, 'sig1': pf1.signo, 'pos2': pf2.pos_str, 'sig2': pf2.signo,
-                            'tipo_sigla': sigla_tipo_aspecto(pf1_nome, pf2_nome),
+                            'tipo': 'ponto-ponto',
                         })
 
-    # ------------- trânsitos e eventos -------------
+    # --------- trânsitos (como no seu código) --------- #
     def _deduplicate_transitos(self, janela_tempo: float = 0.15) -> None:
         if not self.transitos:
             return
@@ -427,18 +413,19 @@ class MapaAstral:
             chave = (trans.planeta1, trans.planeta2, asp_key)
             grupos.setdefault(chave, []).append(trans)
         transitos_filtrados = []
-        for _, grupo in grupos.items():
-            if len(grupo) == 1:
-                transitos_filtrados.append(grupo[0])
+        for _, transitos_grupo in grupos.items():
+            if len(transitos_grupo) == 1:
+                transitos_filtrados.append(transitos_grupo[0])
                 continue
-            grupo.sort(key=lambda x: x.jd_exato)
-            subclusters, cluster_atual = [], [grupo[0]]
-            for i in range(1, len(grupo)):
-                if grupo[i].jd_exato - grupo[i - 1].jd_exato <= janela_tempo:
-                    cluster_atual.append(grupo[i])
+            transitos_grupo.sort(key=lambda x: x.jd_exato)
+            subclusters = []
+            cluster_atual = [transitos_grupo[0]]
+            for i in range(1, len(transitos_grupo)):
+                if transitos_grupo[i].jd_exato - transitos_grupo[i - 1].jd_exato <= janela_tempo:
+                    cluster_atual.append(transitos_grupo[i])
                 else:
                     subclusters.append(cluster_atual)
-                    cluster_atual = [grupo[i]]
+                    cluster_atual = [transitos_grupo[i]]
             if cluster_atual:
                 subclusters.append(cluster_atual)
             for cluster in subclusters:
@@ -468,17 +455,19 @@ class MapaAstral:
                         pos1_prox = calcular_posicao_planeta(jd_prox, p1)
                         pos2_prox = calcular_posicao_planeta(jd_prox, p2)
                         diff_prox = angular_difference(pos1_prox, pos2_prox)
-                        if min(abs(diff_atual - aspecto_deg), abs(diff_prox - aspecto_deg)) <= orbe:
+                        gap_atual = abs(diff_atual - aspecto_deg)
+                        gap_prox = abs(diff_prox - aspecto_deg)
+                        if min(gap_atual, gap_prox) <= orbe:
                             jd_exato, orbe_final = buscar_transito_exato(
                                 jd_atual, jd_prox, p1, p2, aspecto_deg, orbe, False
                             )
                             if jd_exato > 0 and jd_inicio <= jd_exato <= jd_fim and orbe_final < 0.005:
                                 pos1_ex = calcular_posicao_planeta(jd_exato, p1)
                                 pos2_ex = calcular_posicao_planeta(jd_exato, p2)
-                                trans = Transito(jd_exato, p1, p2, aspecto_deg, pos1_ex, pos2_ex, orbe_final,
-                                                 'aspecto', p2_nome)
+                                trans = Transito(jd_exato, p1, p2, aspecto_deg, pos1_ex, pos2_ex, orbe_final, 'aspecto', p2_nome)
                                 self.transitos.append(trans)
                         jd_atual = jd_prox
+        # Planetas móveis x pontos fixos
         for ponto_nome, ponto_obj in self.pontos_fixos.items():
             for planeta_nome in [nome for nome, code in PLANETAS.items() if code in PLANETAS_MOVEIS]:
                 planeta_code = PLANETAS[planeta_nome]
@@ -491,18 +480,20 @@ class MapaAstral:
                         diff_atual = angular_difference(pos1, ponto_obj.lon)
                         pos1_prox = calcular_posicao_planeta(jd_prox, planeta_code)
                         diff_prox = angular_difference(pos1_prox, ponto_obj.lon)
-                        if min(abs(diff_atual - aspecto_deg), abs(diff_prox - aspecto_deg)) <= orbe:
+                        gap_atual = abs(diff_atual - aspecto_deg)
+                        gap_prox = abs(diff_prox - aspecto_deg)
+                        if min(gap_atual, gap_prox) <= orbe:
                             jd_exato, orbe_final = buscar_transito_exato(
                                 jd_atual, jd_prox, planeta_code, ponto_obj.lon, aspecto_deg, orbe, True
                             )
                             if jd_exato > 0 and jd_inicio <= jd_exato <= jd_fim and orbe_final < 0.005:
                                 pos1_ex = calcular_posicao_planeta(jd_exato, planeta_code)
-                                trans = Transito(jd_exato, planeta_code, -1, aspecto_deg, pos1_ex, ponto_obj.lon,
-                                                 orbe_final, 'aspecto', ponto_nome)
+                                trans = Transito(jd_exato, planeta_code, -1, aspecto_deg, pos1_ex, ponto_obj.lon, orbe_final, 'aspecto', ponto_nome)
                                 self.transitos.append(trans)
                         jd_atual = jd_prox
         self._deduplicate_transitos(janela_tempo=0.15)
 
+    # --------- mudanças de signo e Lua VOC --------- #
     def calcular_mudancas_signo(self, dias_margem: int = 2):
         self.mudancas_signo.clear()
         dt_inicio = self.dt_utc - timedelta(days=dias_margem)
@@ -551,6 +542,68 @@ class MapaAstral:
                     'duracao_hms': duracao_hms,
                 })
 
+    # --------- Estrelas Fixas: CJN/OPO com planetas e pontos fixos --------- #
+    def carregar_estrelas(self):
+        base_dir = os.path.dirname(__file__)
+        caminho = os.path.join(base_dir, 'Estrelas_Fixas.txt')
+        self.estrelas_lista = ler_estrelas_arquivo(caminho)
+
+    def calcular_estrelas_aspectos(self):
+        self.estrelas_hits.clear()
+        if not self.estrelas_lista:
+            self.carregar_estrelas()
+        if not self.estrelas_lista:
+            return
+        # Alvos: todos os planetas + pontos fixos principais
+        alvos: List[Tuple[str, float, str]] = []  # (nome, lon, tipo: 'P'|'PT')
+        for nome, corpo in self.planetas.items():
+            alvos.append((nome, corpo.lon, 'P'))
+        for pf in ['ASC', 'MC', 'FOR']:
+            if pf in self.pontos_fixos:
+                alvos.append((pf, self.pontos_fixos[pf].lon, 'PT'))
+        orbe = abs(float(self.estrelas_orbe_graus))
+        jd = self.jd
+        for est in self.estrelas_lista:
+            # Resolve longitude da estrela
+            if est.lon is not None:
+                lon_estrela = est.lon
+            else:
+                lon_estrela = longitude_estrela_por_nome(jd, est.nome)
+            if lon_estrela is None:
+                continue  # não foi possível resolver a estrela
+            for alvo_nome, alvo_lon, alvo_tipo in alvos:
+                dif = angular_difference(lon_estrela, alvo_lon)
+                # verifica conjunção (0) ou oposição (180) com orbe
+                orbe_cjn = abs(dif - 0.0)
+                orbe_opo = abs(dif - 180.0)
+                if orbe_cjn <= orbe:
+                    asp = 'CJN'
+                    orbe_final = orbe_cjn
+                elif orbe_opo <= orbe:
+                    asp = 'OPO'
+                    orbe_final = orbe_opo
+                else:
+                    continue
+                sigE, posE = graus_para_signo_posicao(lon_estrela)
+                sigA, posA = graus_para_signo_posicao(alvo_lon)
+                self.estrelas_hits.append({
+                    'nome': est.nome,
+                    'const': est.constelacao,
+                    'lonE': lon_estrela,
+                    'sigE': sigE,
+                    'posE': posE,
+                    'alvo': alvo_nome,
+                    'alvo_tipo': alvo_tipo,
+                    'lonA': alvo_lon,
+                    'sigA': sigA,
+                    'posA': posA,
+                    'asp': asp,
+                    'orbe': orbe_final,
+                })
+        # Ordena por orbe menor
+        self.estrelas_hits.sort(key=lambda x: x['orbe'])
+
+    # --------- compila e relatório --------- #
     def compilar_eventos_astral(self):
         self.eventos_astral.clear()
         for trans in self.transitos:
@@ -564,9 +617,7 @@ class MapaAstral:
                     asp_cod = cod
                     break
             asp_cod = asp_cod or '???'
-            tipo_sigla = "[P-PT]" if trans.planeta2 == -1 else "[P-P]"
-            descricao = (f"{tipo_sigla} [{p1_nome} {asp_cod} {p2_nome}] - "
-                         f"{pos1} {sig1} / {pos2} {sig2} - {trans.orbe:.5f}")
+            descricao = f"[{'P-PT' if trans.planeta2 == -1 else 'P-P'}] [{p1_nome} {asp_cod} {p2_nome}] - {pos1} {sig1} / {pos2} {sig2} - {trans.orbe:.5f}"
             evento = EventoAstral(trans.jd_exato, 'aspecto', descricao)
             self.eventos_astral.append(evento)
         for evento in self.mudancas_signo:
@@ -577,62 +628,6 @@ class MapaAstral:
             self.eventos_astral.append(evento)
         self.eventos_astral.sort()
 
-    # ------------- estrelas fixas no momento -------------
-    def checar_estrelas_fixas_no_momento(self, orbe_deg: float = None):
-        """Avalia CJN/OPO de planetas e pontos fixos com estrelas no instante do mapa."""
-        if orbe_deg is None:
-            orbe_deg = self.star_orb_deg
-        resultados = []
-        jd = self.jd
-        base_dir = os.path.dirname(__file__)
-        caminho_tab = os.path.join(base_dir, STAR_LIST_FILENAME)
-        lista = carregar_estrelas_tab(caminho_tab, STAR_LIST_LIMIT)
-        if not lista:
-            return resultados
-        # alvo: todos os planetas + pontos fixos (ASC, MC, FOR)
-        alvos = []
-        for p_nome, corpo in self.planetas.items():
-            alvos.append(('PLAN', p_nome, corpo.lon))
-        for pf_nome, ponto in self.pontos_fixos.items():
-            alvos.append(('PTO', pf_nome, ponto.lon))
-        for item in lista:
-            nome_est = item['nome']
-            const = item.get('constelacao', '')
-            try:
-                lon_est = star_longitude(jd, nome_est)
-            except Exception:
-                # Se a estrela não for reconhecida pelo SE, ignoramos
-                continue
-            sig_s, pos_s = graus_para_signo_posicao(lon_est)
-            for tipo_alvo, nome_alvo, lon_alvo in alvos:
-                d = angular_difference(lon_alvo, lon_est)
-                tipo_hit = None
-                delta = d
-                if d <= orbe_deg:
-                    tipo_hit = 'CJN'
-                elif abs(d - 180.0) <= orbe_deg:
-                    tipo_hit = 'OPO'
-                    delta = abs(d - 180.0)
-                if tipo_hit:
-                    sig_a, pos_a = graus_para_signo_posicao(lon_alvo)
-                    resultados.append({
-                        'estrela': nome_est,
-                        'constelacao': const,
-                        'lon_est': lon_est,
-                        'pos_est': pos_s,
-                        'sig_est': sig_s,
-                        'tipo': tipo_hit,
-                        'alvo_tipo': tipo_alvo,  # PLAN ou PTO
-                        'alvo_nome': nome_alvo,  # SOL... ou ASC/MC/FOR
-                        'lon_alvo': lon_alvo,
-                        'pos_alvo': pos_a,
-                        'sig_alvo': sig_a,
-                        'orbe': delta,
-                    })
-        resultados.sort(key=lambda x: x['orbe'])
-        return resultados
-
-    # ------------- relatório -------------
     def gerar_relatorio(self):
         self.calcular_pontos_fixos()
         self.calcular_planetas()
@@ -641,6 +636,9 @@ class MapaAstral:
         self.calcular_transitos()
         self.calcular_mudancas_signo()
         self.calcular_voc_lua()
+        # Estrelas
+        self.carregar_estrelas()
+        self.calcular_estrelas_aspectos()
         self.compilar_eventos_astral()
 
         rel = []
@@ -682,20 +680,16 @@ class MapaAstral:
         rel.append(f"ASPECTOS ({len(self.aspectos_natais)}):")
         rel.append("-" * 100)
         for asp in sorted(self.aspectos_natais, key=lambda x: x['orbe']):
-            tipo_sigla = asp.get('tipo_sigla', sigla_tipo_aspecto(asp['p1'], asp['p2']))
-            linha = (f"{asp['p1']:3s} [{asp['pos1']} {asp['sig1']}] {asp['cod']} "
-                     f"{asp['p2']:3s} [{asp['pos2']} {asp['sig2']}] - Orbe: {asp['orbe']:.2f} "
-                     f"{tipo_sigla}")
+            tipo = asp.get('tipo', '').replace('planeta-', 'P-').replace('ponto-', 'PT-')
+            linha = f"{asp['p1']:3s} [{asp['pos1']} {asp['sig1']}] {asp['cod']} {asp['p2']:3s} [{asp['pos2']} {asp['sig2']}] - Orbe: {asp['orbe']:.2f} [{tipo}]"
             rel.append(linha)
 
         rel.append("")
         rel.append("=" * 100)
         rel.append(f"TRANSITOS, ENTRADAS E VOC ({len(self.eventos_astral)}):")
         rel.append("-" * 100)
-
         momento_mapa = self.jd
         rel_mostrou_mapa = False
-
         for evento in self.eventos_astral:
             if not rel_mostrou_mapa and evento.jd_exato >= momento_mapa:
                 dt_mapa = jd_para_datetime(momento_mapa, self.timezone_horas)
@@ -708,28 +702,20 @@ class MapaAstral:
             dt_mapa = jd_para_datetime(momento_mapa, self.timezone_horas)
             rel.append(f"{dt_mapa.strftime('%d/%m/%Y %H:%M:%S')} <-------- MOMENTO DO MAPA ASTRAL")
 
-        # ----- BLOCO: ESTRELAS FIXAS (após trânsitos) -----
+        # ----- Secção Estrelas Fixas ----- #
         rel.append("")
         rel.append("=" * 100)
-        rel.append(f"ESTRELAS FIXAS — CJN/OPO (±{self.star_orb_deg:.2f}°) no momento")
+        rel.append(f"ESTRELAS FIXAS — CJN/OPO (±{self.estrelas_orbe_graus:.2f}°) no momento")
         rel.append("-" * 100)
-        try:
-            estrelas_hits = self.checar_estrelas_fixas_no_momento(self.star_orb_deg)
-            if estrelas_hits:
-                for h in estrelas_hits:
-                    # orbe com vírgula como separador decimal
-                    orbe_str = f"{h['orbe']:.3f}".replace('.', ',')
-                    # formatos de longitude entre parênteses
-                    est_long = f"({h['pos_est']} {h['sig_est']})"
-                    alvo_long = f"({h['pos_alvo']} {h['sig_alvo']})"
-                    alvo_rotulo = h['alvo_nome']
-                    linha = (f"{h['estrela']} - {h['constelacao']} - {est_long} "
-                             f"({h['tipo']}) {alvo_rotulo} {alvo_long} - orbe: {orbe_str}º")
-                    rel.append(linha)
-            else:
-                rel.append("(nenhuma conjunção/oposição dentro do orbe configurado)")
-        except Exception as e:
-            rel.append(f"(Falha ao calcular estrelas fixas: {e})")
+        if not self.estrelas_hits:
+            rel.append("(nenhuma conjunção/oposição dentro do orbe configurado)")
+        else:
+            for h in self.estrelas_hits:
+                alvo_label = f"{h['alvo']}" + (" (PT)" if h['alvo_tipo'] == 'PT' else "")
+                rel.append(
+                    f"{h['nome']} – {h['const']} – ({h['posE']} {h['sigE']}) {h['asp']} "
+                    f"{alvo_label} ({h['posA']} {h['sigA']}) – orbe: {h['orbe']:.3f}º"
+                )
 
         rel.append("")
         rel.append("=" * 100)
@@ -768,12 +754,13 @@ class MapaAstral:
         rel.append("https://chatgpt.com/g/g-EumgPewMI-astrologia-horaria-guia")
         rel.append("")
         rel.append("=" * 100)
-        return "\n".join(rel)
+
+        return "
+".join(rel)
 
 
-# ==========================
-# FLASK ROUTES
-# ==========================
+# --------------------------- Flask: UI e endpoints --------------------------- #
+
 @app.route('/')
 def index():
     now = datetime.utcnow()
@@ -797,8 +784,7 @@ label{font-size:11px;color:#555;display:block;margin-top:4px;margin-bottom:2px}
 .row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-bottom:8px}
 .row3{display:grid;grid-template-columns:60px 60px 60px 45px;gap:3px;margin-bottom:8px}
 .row2{display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:6px;margin-bottom:8px}
-.rowtz{display:grid;grid-template-columns:100px 1fr;gap:6px;margin-bottom:8px}
-.row2b{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px}
+.rowtz{display:grid;grid-template-columns:100px 1fr 140px;gap:6px;margin-bottom:8px}
 button{width:100%;padding:8px;background:linear-gradient(135deg,#667eea,#764ba2);color:white;border:none;border-radius:4px;cursor:pointer;font-weight:bold;font-size:12px}
 button:hover{transform:translateY(-2px)}
 .resultado{margin-top:20px;padding:15px;background:#f0f9ff;border-radius:8px;display:none;max-height:500px;overflow-y:auto}
@@ -854,15 +840,12 @@ button:hover{transform:translateY(-2px)}
 <input type="number" id="lons" min="0" max="59" value="12" required>
 <select id="lonh" style="width:100%"><option>E</option><option selected>W</option></select>
 </div>
-<div class="row2b">
-<div>
 <label>Zona de Tempo (UTC)</label>
+<div class="rowtz">
 <input type="number" id="tz" step="0.5" value="-3" required style="width:100%">
-</div>
-<div>
-<label>Orbe Estrelas (°)</label>
-<input type="number" id="star_orb" step="0.01" value="0.10" required style="width:100%" title="Orbe para CJN/OPO com estrelas fixas">
-</div>
+<div></div>
+<label style="align-self:center">Orbe Estrelas (°)</label>
+<input type="text" id="orbeEstrelas" value="0.10" style="width:100px" title="Orbe para CJN/OPO com estrelas fixas">
 </div>
 <label>Casas Terrestres</label>
 <select id="houseSys" style="width:100%">
@@ -894,27 +877,39 @@ function dmsToDecimal(g, m, s, h) {
   let d = Math.abs(g) + Math.abs(m)/60 + Math.abs(s)/3600;
   return (h == 'S' || h == 'W') ? -d : d;
 }
+
 function copiarResultado() {
   let txt = document.getElementById('txt').textContent;
-  navigator.clipboard.writeText(txt).then(function() { alert('Texto copiado para memoria!'); });
+  navigator.clipboard.writeText(txt).then(function() {
+    alert('Texto copiado para memoria!');
+  });
 }
+
 function abrirBusca() {
   let cidadeAtual = document.getElementById('cidade').value;
   document.getElementById('search').value = cidadeAtual;
   document.getElementById('modal').style.display = 'flex';
   document.getElementById('search').focus();
 }
+
 function atualizarHoraParaTimeZone() {
   let tz = parseFloat(document.getElementById('tz').value);
   let now = new Date();
-  let nova_hora = (now.getUTCHours() + tz + 24) % 24;
+  let hora_utc = now.getUTCHours();
+  let minuto_utc = now.getUTCMinutes();
+  let segundo_utc = now.getUTCSeconds();
+  let nova_hora = (hora_utc + tz + 24) % 24;
   document.getElementById('hora').value = Math.floor(nova_hora);
-  document.getElementById('minuto').value = now.getUTCMinutes();
-  document.getElementById('segundo').value = now.getUTCSeconds();
+  document.getElementById('minuto').value = minuto_utc;
+  document.getElementById('segundo').value = segundo_utc;
 }
+
 document.getElementById('search').addEventListener('input', async function(e) {
   let q = e.target.value;
-  if (q.length < 2) { document.getElementById('cidades-list').innerHTML = ''; return; }
+  if (q.length < 2) {
+    document.getElementById('cidades-list').innerHTML = '';
+    return;
+  }
   let r = await fetch('/api/cidades?q=' + encodeURIComponent(q));
   let c = await r.json();
   document.getElementById('cidades-list').innerHTML = '';
@@ -926,24 +921,41 @@ document.getElementById('search').addEventListener('input', async function(e) {
       document.getElementById('cidade').value = d.city;
       document.getElementById('estado').value = d.state;
       document.getElementById('pais').value = d.country;
-      let latD = Math.abs(d.lat), lonD = Math.abs(d.lon);
-      let latG = Math.floor(latD), lonG = Math.floor(lonD);
-      let latM = Math.floor((latD - latG) * 60), lonM = Math.floor((lonD - lonG) * 60);
-      let latS = Math.round(((latD - latG) * 60 - latM) * 60), lonS = Math.round(((lonD - lonG) * 60 - lonM) * 60);
-      document.getElementById('latg').value = latG;  document.getElementById('latm').value = latM;  document.getElementById('lats').value = latS;
+      let latD = Math.abs(d.lat);
+      let latG = Math.floor(latD);
+      let latM = Math.floor((latD - latG) * 60);
+      let latS = Math.round(((latD - latG) * 60 - latM) * 60);
+      document.getElementById('latg').value = latG;
+      document.getElementById('latm').value = latM;
+      document.getElementById('lats').value = latS;
       document.getElementById('lath').value = (d.lat < 0 ? 'S' : 'N');
-      document.getElementById('long').value = lonG; document.getElementById('lonm').value = lonM; document.getElementById('lons').value = lonS;
+      let lonD = Math.abs(d.lon);
+      let lonG = Math.floor(lonD);
+      let lonM = Math.floor((lonD - lonG) * 60);
+      let lonS = Math.round(((lonD - lonG) * 60 - lonM) * 60);
+      document.getElementById('long').value = lonG;
+      document.getElementById('lonm').value = lonM;
+      document.getElementById('lons').value = lonS;
       document.getElementById('lonh').value = (d.lon < 0 ? 'W' : 'E');
-      document.getElementById('tz').value = d.tz; atualizarHoraParaTimeZone();
+      document.getElementById('tz').value = d.tz;
+      atualizarHoraParaTimeZone();
       document.getElementById('modal').style.display = 'none';
     };
     document.getElementById('cidades-list').appendChild(div);
   });
 });
+
 document.getElementById('f').addEventListener('submit', async function(e) {
   e.preventDefault();
-  let lat = dmsToDecimal(parseInt(document.getElementById('latg').value), parseInt(document.getElementById('latm').value), parseInt(document.getElementById('lats').value), document.getElementById('lath').value);
-  let lon = dmsToDecimal(parseInt(document.getElementById('long').value), parseInt(document.getElementById('lonm').value), parseInt(document.getElementById('lons').value), document.getElementById('lonh').value);
+  let lat = dmsToDecimal(parseInt(document.getElementById('latg').value), 
+                         parseInt(document.getElementById('latm').value), 
+                         parseInt(document.getElementById('lats').value), 
+                         document.getElementById('lath').value);
+  let lon = dmsToDecimal(parseInt(document.getElementById('long').value), 
+                         parseInt(document.getElementById('lonm').value), 
+                         parseInt(document.getElementById('lons').value), 
+                         document.getElementById('lonh').value);
+  let orbeEst = document.getElementById('orbeEstrelas').value.replace(',', '.');
   let dados = {
     nome: document.getElementById('nome').value,
     dia: parseInt(document.getElementById('dia').value),
@@ -959,15 +971,23 @@ document.getElementById('f').addEventListener('submit', async function(e) {
     estado: document.getElementById('estado').value,
     pais: document.getElementById('pais').value,
     houseSys: document.getElementById('houseSys').value,
-    star_orb: parseFloat(document.getElementById('star_orb').value)
+    estrelas_orbe: parseFloat(orbeEst)
   };
   document.getElementById('load').style.display = 'block';
   document.getElementById('res').style.display = 'none';
-  let res = await fetch('/api/calcular', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(dados) });
+  let res = await fetch('/api/calcular', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(dados)
+  });
   let j = await res.json();
   document.getElementById('load').style.display = 'none';
-  if (j.status == 'ok') { document.getElementById('txt').textContent = j.relatorio; document.getElementById('res').style.display = 'block'; }
-  else { alert('Erro: ' + j.msg); }
+  if (j.status == 'ok') {
+    document.getElementById('txt').textContent = j.relatorio;
+    document.getElementById('res').style.display = 'block';
+  } else {
+    alert('Erro: ' + j.msg);
+  }
 });
 </script>
 </body>
@@ -992,8 +1012,12 @@ def cidades():
                             city = p[3].lower()
                             if q in city:
                                 result.append({
-                                    'city': p[3], 'state': p[2], 'country': p[1],
-                                    'lat': float(p[4]), 'lon': float(p[5]), 'tz': float(p[8])
+                                    'city': p[3],
+                                    'state': p[2],
+                                    'country': p[1],
+                                    'lat': float(p[4]),
+                                    'lon': float(p[5]),
+                                    'tz': float(p[8])
                                 })
                                 if len(result) >= 20:
                                     break
@@ -1013,7 +1037,8 @@ def calcular():
             int(d['hora']), int(d['minuto']), int(d['segundo']),
             float(d['latitude']), float(d['longitude']), float(d['timezone']),
             d.get('cidade', ''), d.get('estado', ''), d.get('pais', ''),
-            d.get('houseSys', 'Regiomontanus'), float(d.get('star_orb', STAR_DEFAULT_ORB))
+            d.get('houseSys', 'Regiomontanus'),
+            float(d.get('estrelas_orbe', 0.10))
         )
         return jsonify({'status': 'ok', 'relatorio': m.gerar_relatorio()})
     except Exception as e:
