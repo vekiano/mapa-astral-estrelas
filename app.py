@@ -62,6 +62,7 @@ def dt_to_jd_utc(dt_utc):
 
 
 def jd_para_datetime(jd, tz_offset=0.0):
+    tz_offset = float(tz_offset)  # Garantir que é float
     year, month, day, hour = swe.revjul(jd + tz_offset / 24.0)
     hour_int = int(hour)
     minute = int((hour - hour_int) * 60)
@@ -382,17 +383,20 @@ class MapaAstral:
     def __init__(self, nome_mapa, dia, mes, ano, hora, minuto, segundo,
                  latitude_dec, longitude_dec, timezone_horas, cidade='', estado='', pais='',
                  house_system_label='Regiomontanus', estrelas_orbe_graus: float = 0.10):
-        self.nome_mapa = nome_mapa.strip()
-        self.dia, self.mes, self.ano = dia, mes, ano
-        self.hora, self.minuto, self.segundo = hora, minuto, segundo
-        self.latitude, self.longitude = latitude_dec, longitude_dec
-        self.timezone_horas = float(timezone_horas)  # CORRIGIDO: converter para float
-        self.cidade, self.estado, self.pais = cidade, estado, pais
-        self.house_system_label = house_system_label
+        self.nome_mapa = str(nome_mapa).strip()
+        self.dia, self.mes, self.ano = int(dia), int(mes), int(ano)
+        self.hora, self.minuto, self.segundo = int(hora), int(minuto), int(segundo)
+        self.latitude = float(latitude_dec)
+        self.longitude = float(longitude_dec)
+        self.timezone_horas = float(timezone_horas)  # ← GARANTIR FLOAT
+        self.cidade = str(cidade)
+        self.estado = str(estado)
+        self.pais = str(pais)
+        self.house_system_label = str(house_system_label)
         self.estrelas_orbe_graus = float(estrelas_orbe_graus)
 
-        self.dt_local = datetime(ano, mes, dia, hora, minuto, segundo)
-        self.dt_utc = self.dt_local - timedelta(hours=self.timezone_horas)
+        self.dt_local = datetime(self.ano, self.mes, self.dia, self.hora, self.minuto, self.segundo)
+        self.dt_utc = self.dt_local - timedelta(hours=self.timezone_horas)  # ← AGORA É FLOAT
         self.jd = dt_to_jd_utc(self.dt_utc)
 
         self.planetas: Dict[str, Corpo] = {}
@@ -1074,10 +1078,13 @@ def cidades():
 def calcular():
     try:
         d = request.json
+        # Garantir que timezone é float
+        timezone_value = float(d.get('timezone', -3))
+
         m = MapaAstral(
             d.get('nome', 'Mapa'), int(d['dia']), int(d['mes']), int(d['ano']),
             int(d['hora']), int(d['minuto']), int(d['segundo']),
-            float(d['latitude']), float(d['longitude']), float(d['timezone']),
+            float(d['latitude']), float(d['longitude']), timezone_value,
             d.get('cidade', ''), d.get('estado', ''), d.get('pais', ''),
             d.get('houseSys', 'Regiomontanus'),
             float(d.get('estrelas_orbe', 0.10))
